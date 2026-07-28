@@ -10,12 +10,28 @@ export class LocalSlackOAuthDouble implements SlackOAuthTransport {
   private readonly activeTokens = new Set<string>();
   private readonly refreshTokens = new Map<string, string>();
 
+  public constructor(
+    private readonly teamId = 'T00000001',
+    private readonly teamName = 'Simply360 Developer Test',
+  ) {
+    if (!/^[ET][A-Z0-9]{8,20}$/u.test(teamId)) {
+      throw new Error('local Slack workspace ID is invalid');
+    }
+    if (!teamName) throw new Error('local Slack workspace name is required');
+  }
+
   public clientConfig(): {
     readonly clientId: string;
     readonly clientSecret: string;
     readonly redirectUri: string;
+    readonly expectedTeamId: string;
   } {
-    return { clientId: this.clientId, clientSecret: this.clientSecret, redirectUri: this.redirectUri };
+    return {
+      clientId: this.clientId,
+      clientSecret: this.clientSecret,
+      redirectUri: this.redirectUri,
+      expectedTeamId: this.teamId,
+    };
   }
 
   public authorize(): string {
@@ -68,7 +84,7 @@ export class LocalSlackOAuthDouble implements SlackOAuthTransport {
       token_type: 'bot',
       scope: 'chat:write',
       bot_user_id: 'U0000BOT1',
-      team: { id: 'T00000001', name: 'Simply360 Developer Test' },
+      team: { id: this.teamId, name: this.teamName },
     };
   }
 

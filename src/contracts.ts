@@ -1,6 +1,24 @@
+import { parsePublicEventOccurrence } from './public-event-contract.js';
+
 export const SIMPLY_ID_PATTERN = /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/u;
 export const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 export const DECLARATION_KEY_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+export const SLACK_EVENT_DESTINATION_EVENT_TYPES = [
+  'dataRecord.created',
+  'dataRecord.updated',
+  'remoteAction.completed',
+  'remoteAction.failed',
+  'remoteTrigger.completed',
+  'remoteTrigger.failed',
+] as const;
+export const SLACK_LIFECYCLE_EVENT_TYPES = [
+  'app.install.completed',
+  'app.setup.completed',
+  'app.uninstalled',
+] as const;
+export type SlackEventDestinationEventType = (typeof SLACK_EVENT_DESTINATION_EVENT_TYPES)[number];
+export type SlackLifecycleEventType = (typeof SLACK_LIFECYCLE_EVENT_TYPES)[number];
 
 export type OAuthScope =
   | 'schema:read'
@@ -20,7 +38,7 @@ export interface EventOccurrence {
   readonly eventSimplyId: string;
   readonly teamSimplyId: string;
   readonly teamIntegrationSimplyId: string;
-  readonly eventType: string;
+  readonly eventType: SlackEventDestinationEventType | SlackLifecycleEventType;
   readonly protocolVersion: 1 | 2;
   readonly payloadSchemaId: string;
   readonly payloadSchemaVersion: 1;
@@ -70,39 +88,7 @@ export function assertSimplyId(value: unknown, field: string): asserts value is 
 }
 
 export const parseEventOccurrence = (input: unknown): EventOccurrence => {
-  if (!isPlainRecord(input)) throw new Error('event occurrence must be a plain object');
-  assertExactKeys(
-    input,
-    [
-      'eventSimplyId',
-      'teamSimplyId',
-      'teamIntegrationSimplyId',
-      'eventType',
-      'protocolVersion',
-      'payloadSchemaId',
-      'payloadSchemaVersion',
-      'occurredAt',
-      'payload',
-    ],
-    'event occurrence',
-  );
-  assertSimplyId(input.eventSimplyId, 'eventSimplyId');
-  assertSimplyId(input.teamSimplyId, 'teamSimplyId');
-  assertSimplyId(input.teamIntegrationSimplyId, 'teamIntegrationSimplyId');
-  if (typeof input.eventType !== 'string' || input.eventType.length < 1 || input.eventType.length > 120) {
-    throw new Error('eventType is invalid');
-  }
-  if (input.protocolVersion !== 1 && input.protocolVersion !== 2) throw new Error('protocolVersion is invalid');
-  if (typeof input.payloadSchemaId !== 'string' || !/^simply360\.[a-z0-9.-]+\/v[1-9]\d*$/u.test(input.payloadSchemaId)) {
-    throw new Error('payloadSchemaId is invalid');
-  }
-  if (input.payloadSchemaVersion !== 1) throw new Error('payloadSchemaVersion is invalid');
-  if (typeof input.occurredAt !== 'string' || !Number.isFinite(Date.parse(input.occurredAt))) {
-    throw new Error('occurredAt is invalid');
-  }
-  if (!isPlainRecord(input.payload)) throw new Error('payload must be a plain object');
-  if (input.payload.eventType !== input.eventType) throw new Error('payload eventType must match occurrence eventType');
-  return input as unknown as EventOccurrence;
+  return parsePublicEventOccurrence<EventOccurrence>(input);
 };
 
 export const parseSendToChannelInput = (input: unknown): SendToChannelInput => {
@@ -118,4 +104,39 @@ export const parseSendToChannelInput = (input: unknown): SendToChannelInput => {
     throw new Error('text contains a forbidden control or bidi character');
   }
   return { channel: input.channel, text: input.text };
+};
+
+export const parseCreateRecordFromMessageInput = (input: unknown): CreateRecordFromMessageInput => {
+  if (!isPlainRecord(input)) throw new Error('create-record-from-message input must be a plain object');
+  assertExactKeys(
+    input,
+    ['slackTeam', 'channel', 'messageTimestamp', 'sender', 'text'],
+    'create-record-from-message input',
+  );
+  if (typeof input.slackTeam !== 'string' || !/^[ET][A-Z0-9]{8,20}$/u.test(input.slackTeam)) {
+    throw new Error('slackTeam must be a Slack workspace or enterprise ID');
+  }
+  if (typeof input.channel !== 'string' || !/^[CG][A-Z0-9]{8,20}$/u.test(input.channel)) {
+    throw new Error('channel must be a Slack channel ID');
+  }
+  if (typeof input.sender !== 'string' || !/^[UW][A-Z0-9]{8,20}$/u.test(input.sender)) {
+    throw new Error('sender must be a Slack user ID');
+  }
+  if (
+    typeof input.messageTimestamp !== 'string' ||
+    !/^[0-9]{10,16}\.[0-9]{1,6}$/u.test(input.messageTimestamp) ||
+    input.messageTimestamp.length > 32
+  ) {
+    throw new Error('messageTimestamp must be a canonical Slack message timestamp');
+  }
+  if (typeof input.text !== 'string' || input.text.length < 1 || input.text.length > 3_000) {
+    throw new Error('text must contain 1 to 3000 characters');
+  }
+  return {
+    slackTeam: input.slackTeam,
+    channel: input.channel,
+    messageTimestamp: input.messageTimestamp,
+    sender: input.sender,
+    text: input.text,
+  };
 };

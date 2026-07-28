@@ -33,3 +33,27 @@ test('Slack authorization codes are single use', async () => {
   await client.exchange(code);
   await assert.rejects(client.exchange(code), /reviewed rotating bot grant/);
 });
+
+test('Slack token refresh cannot change the bound workspace', async () => {
+  const provider = new LocalSlackOAuthDouble('T00000001');
+  const transport = {
+    exchange: (input) => provider.exchange(input),
+    refresh: async () => ({
+      ok: true,
+      access_token: ['xoxe.xoxb', 'local', 'workspace', 'change'].join('-'),
+      refresh_token: ['xoxe', 'local', 'workspace', 'change'].join('-'),
+      expires_in: 43_200,
+      token_type: 'bot',
+      scope: 'chat:write',
+      bot_user_id: 'U0000BOT1',
+      team: { id: 'T00000002', name: 'Wrong workspace' },
+    }),
+    revoke: (accessToken) => provider.revoke(accessToken),
+  };
+  const client = new SlackOAuthClient(provider.clientConfig(), transport);
+  const grant = await client.exchange(provider.authorize());
+  await assert.rejects(
+    client.refresh(grant.refreshToken),
+    /reviewed rotating bot grant/,
+  );
+});

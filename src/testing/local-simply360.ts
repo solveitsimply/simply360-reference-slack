@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import type { OAuthScope, OAuthTokenSet, RemoteTriggerPublisher } from '../contracts.js';
 import { computeS256CodeChallenge, type OAuthTransport } from '../oauth.js';
@@ -77,6 +77,7 @@ export class LocalSimply360Double implements OAuthTransport, RemoteTriggerPublis
   private readonly authorizationCodes = new Map<string, AuthorizationCode>();
   private readonly tokenFamilies = new Map<string, TokenFamily>();
   private readonly accessGrants = new Map<string, AccessGrant>();
+  private readonly sharedBlueprintsByTeamAndPackage = new Map<string, string>();
   public readonly triggers: Array<{ readonly idempotencyKey: string; readonly input: unknown }> = [];
 
   public oauthClientConfig(): {
@@ -203,6 +204,10 @@ export class LocalSimply360Double implements OAuthTransport, RemoteTriggerPublis
   public linkUser(teamIntegrationSimplyId: string, userSimplyId: string): string {
     const installation = this.requireInstallation(teamIntegrationSimplyId);
     if (installation.state !== 'ACTIVE') throw new Error('installation must be active');
+    const active = [...installation.userLinks.entries()].find(
+      ([, link]) => link.userSimplyId === userSimplyId && link.active,
+    );
+    if (active) return active[0];
     this.userLinkSequence += 1;
     const linkSimplyId = `ULNK-0001-${String(this.userLinkSequence).padStart(4, '0')}`;
     installation.userLinks.set(linkSimplyId, { userSimplyId, active: true });
@@ -225,12 +230,20 @@ export class LocalSimply360Double implements OAuthTransport, RemoteTriggerPublis
     const installation = this.requireInstallation(teamIntegrationSimplyId);
     if (installation.state !== 'ACTIVE') throw new Error('installation must be active');
     installation.blueprintPackageKey = packageKey;
-    return `TBPL-0001-${packageKey === 'slack-message-log' ? 'SHRD' : 'OTHR'}`;
+    const authority = `${installation.teamSimplyId}\n${packageKey}`;
+    const existing = this.sharedBlueprintsByTeamAndPackage.get(authority);
+    if (existing) return existing;
+    const digest = createHash('sha256').update(authority).digest('hex').slice(0, 8).toUpperCase();
+    const teamBlueprintSimplyId = `TBPL-${digest.slice(0, 4)}-${digest.slice(4, 8)}`;
+    this.sharedBlueprintsByTeamAndPackage.set(authority, teamBlueprintSimplyId);
+    return teamBlueprintSimplyId;
   }
 
   public uninstall(teamIntegrationSimplyId: string): void {
     const installation = this.requireInstallation(teamIntegrationSimplyId);
     installation.state = 'UNINSTALLED';
+    installation.blueprintPackageKey = undefined;
+    for (const link of installation.userLinks.values()) link.active = false;
     for (const family of this.tokenFamilies.values()) {
       if (family.installationId === teamIntegrationSimplyId) family.phase = 'REVOKED';
     }

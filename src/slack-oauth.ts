@@ -37,6 +37,7 @@ export class SlackOAuthClient {
       readonly clientId: string;
       readonly clientSecret: string;
       readonly redirectUri: string;
+      readonly expectedTeamId: string;
     },
     private readonly transport: SlackOAuthTransport,
   ) {
@@ -44,6 +45,10 @@ export class SlackOAuthClient {
     if (redirect.protocol !== 'https:' || redirect.username || redirect.password || redirect.hash) {
       throw new Error('Slack OAuth redirect URI must be an exact HTTPS URL');
     }
+    if (!/^[ET][A-Z0-9]{8,20}$/u.test(config.expectedTeamId)) {
+      throw new Error('Slack OAuth expectedTeamId must be an exact workspace or enterprise ID');
+    }
+    if (!config.clientId || !config.clientSecret) throw new Error('Slack OAuth client credentials are required');
   }
 
   public start(): { readonly url: string; readonly state: string } {
@@ -96,7 +101,12 @@ export class SlackOAuthClient {
       team === null ||
       Array.isArray(team) ||
       typeof (team as Record<string, unknown>).id !== 'string' ||
-      typeof (team as Record<string, unknown>).name !== 'string'
+      !/^[ET][A-Z0-9]{8,20}$/u.test((team as Record<string, unknown>).id as string) ||
+      (team as Record<string, unknown>).id !== this.config.expectedTeamId ||
+      typeof (team as Record<string, unknown>).name !== 'string' ||
+      (team as Record<string, unknown>).name === '' ||
+      typeof value.bot_user_id !== 'string' ||
+      !/^[UW][A-Z0-9]{8,20}$/u.test(value.bot_user_id)
     ) {
       throw new Error('Slack OAuth response is not the reviewed rotating bot grant');
     }

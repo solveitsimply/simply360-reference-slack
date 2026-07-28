@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 
+import {
+  SLACK_EVENT_DESTINATION_EVENT_TYPES,
+  SLACK_LIFECYCLE_EVENT_TYPES,
+} from './contracts.js';
+
 const REPOSITORY_URL = 'https://github.com/solveitsimply/simply360-reference-slack';
 const RUNTIME_ORIGIN = 'https://reference-slack.dev.simply360.app';
 
@@ -149,14 +154,7 @@ export const buildReferenceAssets = (sourceCommit: string): {
         endpointKey: 'events',
         exactUrl: `${RUNTIME_ORIGIN}/events/simply360`,
         protocolVersion: 2,
-        eventTypes: [
-          'dataRecord.created',
-          'dataRecord.updated',
-          'remoteAction.completed',
-          'remoteAction.failed',
-          'remoteTrigger.completed',
-          'remoteTrigger.failed',
-        ],
+        eventTypes: [...SLACK_EVENT_DESTINATION_EVENT_TYPES],
         filters: {},
       },
     ],
@@ -184,7 +182,7 @@ export const buildReferenceAssets = (sourceCommit: string): {
           type: 'object',
           properties: {
             channel: { type: 'string', minLength: 9, maxLength: 21 },
-            messageTimestamp: { type: 'string', minLength: 3, maxLength: 32 },
+            messageTimestamp: { type: 'string', minLength: 12, maxLength: 32 },
           },
           required: ['channel', 'messageTimestamp'],
           additionalProperties: false,
@@ -236,7 +234,7 @@ export const buildReferenceAssets = (sourceCommit: string): {
         endpointKey: 'lifecycle',
         exactUrl: `${RUNTIME_ORIGIN}/lifecycle`,
         protocolVersion: 1,
-        eventTypes: ['app.install.completed', 'app.setup.completed', 'app.uninstalled'],
+        eventTypes: [...SLACK_LIFECYCLE_EVENT_TYPES],
       },
     },
     support: {

@@ -1,4 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import {
+  SLACK_EVENT_DESTINATION_EVENT_TYPES,
+  parseCreateRecordFromMessageInput,
   parseEventOccurrence,
   parseSendToChannelInput,
   type RemoteTriggerPublisher,
@@ -10,25 +14,46 @@ import { verifySlackSignature } from './slack.js';
 import { verifyWebhookV2, type WebhookIdentityHeaders, type WebhookSigningKey } from './webhook-v2.js';
 
 export interface IdempotencyStore<T> {
-  run(key: string, operation: () => Promise<T>): Promise<{ readonly replayed: boolean; readonly value: T }>;
+  run(
+    key: string,
+    requestFingerprint: string,
+    operation: () => Promise<T>,
+  ): Promise<{ readonly replayed: boolean; readonly value: T }>;
+}
+
+export class IdempotencyConflictError extends Error {
+  public constructor() {
+    super('idempotency key was already used for a different request');
+    this.name = 'IdempotencyConflictError';
+  }
 }
 
 export class MemoryIdempotencyStore<T> implements IdempotencyStore<T> {
-  private readonly values = new Map<string, Promise<T>>();
+  private readonly values = new Map<string, { readonly requestFingerprint: string; readonly value: Promise<T> }>();
 
-  public async run(key: string, operation: () => Promise<T>): Promise<{ readonly replayed: boolean; readonly value: T }> {
+  public async run(
+    key: string,
+    requestFingerprint: string,
+    operation: () => Promise<T>,
+  ): Promise<{ readonly replayed: boolean; readonly value: T }> {
     const existing = this.values.get(key);
-    if (existing !== undefined) return { replayed: true, value: await existing };
+    if (existing !== undefined) {
+      if (existing.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError();
+      return { replayed: true, value: await existing.value };
+    }
     const pending = operation();
-    this.values.set(key, pending);
+    const record = { requestFingerprint, value: pending };
+    this.values.set(key, record);
     try {
       return { replayed: false, value: await pending };
     } catch (error) {
-      if (this.values.get(key) === pending) this.values.delete(key);
+      if (this.values.get(key) === record) this.values.delete(key);
       throw error;
     }
   }
 }
+
+const sha256 = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 
 export class SlackReferenceRuntime {
   public constructor(
@@ -61,12 +86,14 @@ export class SlackReferenceRuntime {
     if (
       occurrence.eventSimplyId !== verified.delivery.eventId ||
       occurrence.teamSimplyId !== this.config.teamSimplyId ||
-      occurrence.teamIntegrationSimplyId !== this.config.teamIntegrationSimplyId
+      occurrence.teamIntegrationSimplyId !== this.config.teamIntegrationSimplyId ||
+      occurrence.protocolVersion !== 2 ||
+      !SLACK_EVENT_DESTINATION_EVENT_TYPES.some((eventType) => eventType === occurrence.eventType)
     ) {
       throw new Error('Simply360 occurrence does not belong to this installation');
     }
     const dedupeKey = `${verified.delivery.eventId}:${verified.delivery.deliveryId}`;
-    const result = await this.deliveryDedupe.run(dedupeKey, async () => {
+    const result = await this.deliveryDedupe.run(dedupeKey, verified.delivery.bodySha256Hex, async () => {
       const message = [
         `Simply360 event: ${occurrence.eventType}`,
         `installation: ${occurrence.teamIntegrationSimplyId}`,
@@ -88,8 +115,11 @@ export class SlackReferenceRuntime {
    */
   public async sendToChannel(untrustedInput: unknown, idempotencyKey: string): Promise<SendToChannelOutput> {
     if (!/^[A-Za-z0-9._:-]{16,200}$/u.test(idempotencyKey)) throw new Error('idempotency key is invalid');
-    const result = await this.actionDedupe.run(idempotencyKey, () =>
-      this.slack.postMessage(parseSendToChannelInput(untrustedInput), idempotencyKey),
+    const input = parseSendToChannelInput(untrustedInput);
+    const result = await this.actionDedupe.run(
+      idempotencyKey,
+      sha256(JSON.stringify(input)),
+      () => this.slack.postMessage(input, idempotencyKey),
     );
     return result.value;
   }
@@ -105,10 +135,14 @@ export class SlackReferenceRuntime {
     const raw = typeof input.rawBody === 'string' ? input.rawBody : Buffer.from(input.rawBody).toString('utf8');
     if (Buffer.byteLength(raw) > 256 * 1024) throw new Error('Slack request exceeds the byte limit');
     const form = new URLSearchParams(raw);
-    if ([...form.keys()].some((key) => key !== 'payload') || !form.has('payload')) {
+    const payloads = form.getAll('payload');
+    if (
+      [...form.keys()].some((key) => key !== 'payload') ||
+      payloads.length !== 1
+    ) {
       throw new Error('Slack request form is invalid');
     }
-    const payloadText = form.get('payload') as string;
+    const payloadText = payloads[0] as string;
     if (Buffer.byteLength(payloadText) > 128 * 1024) throw new Error('Slack interaction payload exceeds the byte limit');
     const parsed = JSON.parse(payloadText) as unknown;
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('Slack interaction body is invalid');
@@ -147,19 +181,20 @@ export class SlackReferenceRuntime {
     if (team.id !== this.config.slackTeamId) {
       throw new Error('Slack interaction does not belong to this installation');
     }
-    const dedupeKey = `slack:${team.id}:${channel.id}:${message.ts}:s360_create_record`;
-    const result = await this.triggerDedupe.run(dedupeKey, async () => {
+    const triggerInput = parseCreateRecordFromMessageInput({
+      slackTeam: team.id,
+      channel: channel.id,
+      messageTimestamp: message.ts,
+      sender: user.id,
+      text: message.text,
+    });
+    const dedupeKey = `slack:${triggerInput.slackTeam}:${triggerInput.channel}:${triggerInput.messageTimestamp}:s360_create_record`;
+    const result = await this.triggerDedupe.run(dedupeKey, sha256(JSON.stringify(triggerInput)), async () => {
       await this.triggerPublisher.publishCreateRecordFromMessage(
-        {
-          slackTeam: team.id as string,
-          channel: channel.id as string,
-          messageTimestamp: message.ts as string,
-          sender: user.id as string,
-          text: message.text as string,
-        },
+        triggerInput,
         dedupeKey,
       );
-      return message.ts as string;
+      return triggerInput.messageTimestamp;
     });
     return { outcome: result.replayed ? 'DUPLICATE' : 'TRIGGERED' };
   }
