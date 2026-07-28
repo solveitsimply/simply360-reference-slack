@@ -1,49 +1,73 @@
-# Infrastructure — intended provisioning (placeholder)
+# NonProd infrastructure target (not provisioned)
 
-This document records the **intended** AWS/GitHub OIDC provisioning for this
-reference proof. **No AWS resources are created by this repository.** Everything
-below is a later provisioning step, owned and rotated by the platform owner.
+No AWS resources are created by this repository today. This is the exact target
+for the later reviewed deployment after the public SDK and remote-protocol
+blockers close.
 
-## GitHub OIDC deploy role
+## Ownership and guardrails
 
-Deployments use short-lived credentials via GitHub OIDC — no long-lived AWS
-keys. The IAM role trust must be scoped to **this repository and the `dev`
-branch only**:
+| Setting | Required value |
+| --- | --- |
+| AWS account | Simply360 NonProd `592668326732` |
+| Region | `us-east-1` |
+| Stack | `Simply360ReferenceSlackDev` |
+| Public origin | `https://reference-slack.dev.simply360.app` |
+| GitHub repository | `solveitsimply/simply360-reference-slack` |
+| GitHub repository ID | `1305919064` |
+| Branch | protected `dev` only |
+| GitHub environment | `dev` |
+| Secret | `s360/reference-slack/dev/runtime` |
+| Log retention | 7 days |
+| Recurring cost | expected $2–$10/month; stop above $25/month |
 
-- Repository: `solveitsimply/simply360-reference-slack`
-- Trusted subject: `repo:solveitsimply/simply360-reference-slack:ref:refs/heads/dev`
-- OIDC provider: `token.actions.githubusercontent.com` (the org's existing
-  provider is reused)
+Production, `main`, customer data, paid Slack plans, extra scopes, public
+distribution, and spend above the ceiling require fresh approval.
 
-> Creating or promoting a `main` branch — and any `main`-scoped trust — is
-> reserved for the Production/GA plan under fresh explicit authorization.
+## GitHub OIDC deployment role
 
-## NonProd stack and region
+Reuse the organization OIDC provider
+`token.actions.githubusercontent.com`. The role must:
 
-| Setting         | Value                        |
-| --------------- | ---------------------------- |
-| Region          | `us-east-1`                  |
-| Dedicated stack | `Simply360ReferenceSlackDev` |
-| Cost profile    | Low-volume Lambda / API Gateway / DynamoDB / SQS, bounded concurrency, 7-day log retention |
+- trust audience `sts.amazonaws.com`;
+- bind repository ID `1305919064`;
+- bind the `dev` environment and protected `dev` deployment branch;
+- reject pull-request subjects and all other repositories/branches;
+- grant CloudFormation deployment only to `Simply360ReferenceSlackDev` and its
+  explicitly tagged resources; and
+- use no stored AWS access keys.
 
-The monorepo-owned dev evidence stack (`Simply360IntegrationMarketplaceEvidenceDev`)
-is separate and not provisioned here. Deployment roles and Secrets Manager paths
-are repository-scoped and owned/rotated by the platform owner.
+Because GitHub changes the `sub` claim when a job uses an environment, validate
+the actual token claims from a read-only diagnostic workflow before authoring
+the final trust condition. Do not guess a trust-policy key or weaken it to an
+organization-wide wildcard. The `dev` environment must require the protected
+`dev` branch and must not allow workflow-PR approval.
 
-## Slack (owned by Jake as sole human operator)
+## Intended low-volume topology
 
-- Workspace: `Simply360 Developer Test` (dedicated synthetic workspace)
-- App: `Simply360 Reference for Slack (Dev)`
-- Tokens / signing secrets live **only** in the reference stack's Secrets
-  Manager path and follow overlapping rotation. No token material is committed
-  to this repository.
+- Regional API Gateway HTTP API with the exact public routes documented in
+  [Slack provisioning](../docs/provisioning-slack-dev.md).
+- One bounded-concurrency Node 22 Lambda runtime.
+- DynamoDB tables for installation configuration, OAuth state/code metadata,
+  and durable idempotency outcomes; point-in-time recovery enabled, no payload
+  logging.
+- SQS + DLQ only where the published remote-action continuation contract
+  requires asynchronous work. The reviewed `send-to-channel` action is
+  synchronous and must not create a queue by default.
+- Secrets Manager access limited to
+  `s360/reference-slack/dev/runtime`.
+- Route-level throttles, WAF/egress controls if required by the final threat
+  model, CloudWatch alarms, metadata-only structured logs, and 7-day retention.
+- Route 53 + ACM for `reference-slack.dev.simply360.app`.
 
-## Cost guardrail
+The stack must not enter Amplify's default stacks, a VPC, the Simply360
+database, or internal package/runtime networks. It must be independently
+deletable.
 
-Ratified Direction 40: NonProd recurring cost is capped at **$25/month**
-(expected $2–$10/month). Re-estimate before provisioning and stop above the cap.
+## Why no deploy template is committed yet
 
-## What is NOT here
-
-No credentials, secret values, SSM references, or Simply360 internal
-configuration are stored in this repository (Ratified Direction 9 / 21).
+A template without deployable public `REMOTE_ACTION_V1` /
+`REMOTE_TRIGGER_V1` adapters would create a reachable partial service and
+misrepresent Direction-43 mock readiness. Provisioning waits for those public
+contracts and the published SDKs; provider logic and local lifecycle evidence
+are already complete. The later template must be reviewed together with the
+adapters, IAM policy, route limits, cost estimate, and rollback procedure.
