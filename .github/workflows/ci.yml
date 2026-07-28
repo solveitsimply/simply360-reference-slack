@@ -30,11 +30,5 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
-      - name: Type-check
-        run: npm run type-check
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
+      - name: Public-boundary, type, build and test gate
+        run: npm run check

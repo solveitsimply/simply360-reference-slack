@@ -11,7 +11,10 @@
   "scripts": {
     "type-check": "tsc --noEmit",
     "build": "tsc",
-    "test": "npm run build && node --test test/*.test.js"
+    "test": "npm run build && node --test test/*.test.js",
+    "assets": "npm run build && node scripts/generate-reference-assets.mjs",
+    "check:public-boundary": "node scripts/check-public-boundary.mjs",
+    "check": "npm run check:public-boundary && npm run type-check && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
