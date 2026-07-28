@@ -1,0 +1,28 @@
+_metadata:
+  major_version: 2
+display_information:
+  name: Simply360 Reference for Slack (Dev)
+  description: Synthetic Simply360 marketplace reference app for Slack.
+  background_color: "#172033"
+features:
+  bot_user:
+    display_name: Simply360 Reference
+    always_online: false
+  shortcuts:
+    - name: Create Simply360 record
+      type: message
+      callback_id: s360_create_record
+      description: Submit this message to the installed Simply360 test Team.
+oauth_config:
+  redirect_urls:
+    - https://reference-slack.dev.simply360.app/oauth/slack/callback
+  scopes:
+    bot:
+      - chat:write
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://reference-slack.dev.simply360.app/events/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: true
