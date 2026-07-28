@@ -65,9 +65,11 @@ deletable.
 
 ## Why no deploy template is committed yet
 
-A template without deployable public `REMOTE_ACTION_V1` /
-`REMOTE_TRIGGER_V1` adapters would create a reachable partial service and
-misrepresent Direction-43 mock readiness. Provisioning waits for those public
-contracts and the published SDKs; provider logic and local lifecycle evidence
-are already complete. The later template must be reviewed together with the
-adapters, IAM policy, route limits, cost estimate, and rollback procedure.
+A template around the loopback-only local router would expose unauthenticated
+management routes and harness-only `REMOTE_ACTION_V1` / `REMOTE_TRIGGER_V1`
+shapes. That would create a reachable partial service and misrepresent
+Direction-43 mock readiness. Provisioning waits for those public contracts and
+the published SDKs; provider logic and local lifecycle evidence are already
+complete. The later template must be reviewed together with the adapters,
+management-route authentication, IAM policy, route limits, cost estimate, and
+rollback procedure.

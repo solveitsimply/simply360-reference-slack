@@ -200,7 +200,8 @@ As of this repository implementation:
 - The public HTTPS runtime stack is not provisioned.
 - The two `@simply360` SDKs are not published.
 - Public `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` wire schemas/clients are
-  absent.
+  absent. The repository's runnable action route and trigger outbox are local
+  harnesses and are not substitutes for those public contracts.
 - Hosted Simply360 authorization and marketplace submission are not available
   to this repository.
 

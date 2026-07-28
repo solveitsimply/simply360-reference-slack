@@ -27,9 +27,16 @@ Implemented and tested locally:
   bounded `chat.postMessage` adapter;
 - an explicit Slack message shortcut, verified over the raw Slack request with
   the v0 HMAC and replay window, which submits one idempotent
-  `create-record-from-message` trigger to a typed port;
+  `create-record-from-message` trigger to a durable local outbox;
 - the reviewed `send-to-channel` provider behavior with strict schemas,
   concurrent idempotency, and a deterministic Slack `client_msg_id`; and
+- a runnable, loopback-only HTTP service covering installation creation,
+  setup/status, both OAuth callbacks, lifecycle, events, actions, triggers,
+  account links, shared Blueprint association, and uninstall;
+- a mode-`0600`, atomically replaced local credential/state aggregate with
+  restart-safe terminal idempotency results, request-fingerprint conflict
+  detection, Team-scoped shared Blueprint identity, and complete uninstall
+  fences; and
 - source-SHA-bound app-manifest and external-Blueprint asset generation.
 
 Not claimed:
@@ -41,8 +48,9 @@ Not claimed:
   and
 - the public platform declares `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` but
   does not yet publish their invocation/result wire schemas or client
-  functions. Provider logic is complete behind typed ports, but the external
-  HTTP bindings intentionally fail closed until that public contract lands.
+  functions. The local HTTP action shape and file-backed trigger outbox are
+  test harnesses, not a claim of conformance with those unpublished external
+  wire contracts.
 
 These are blockers, not TODO evidence. See [Provision Slack dev](docs/provisioning-slack-dev.md)
 and [Security review](docs/security-review.md).
@@ -58,7 +66,65 @@ npm run check
 
 The check scans the repository for internal Simply360 imports and common
 credential material, type-checks, builds, and runs the local lifecycle/security
-suite.
+suite with minimum 85% line, 85% function, and 65% branch coverage.
+
+### Run the local HTTP service
+
+`npm start` runs the service on `127.0.0.1:8787` after `npm run build`.
+It intentionally refuses a non-loopback `HOST`: the setup and installation
+management routes do not have a published public authentication contract.
+Configure these environment variables without checking values into Git:
+
+```text
+S360_AUTHORIZATION_ENDPOINT
+S360_TOKEN_ENDPOINT
+S360_CLIENT_ID
+S360_CLIENT_SECRET
+S360_REDIRECT_URI
+S360_WEBHOOK_KID_CURRENT
+S360_WEBHOOK_SECRET_CURRENT
+SLACK_CLIENT_ID
+SLACK_CLIENT_SECRET
+SLACK_REDIRECT_URI
+SLACK_SIGNING_SECRET_CURRENT
+```
+
+Optional rotation/state settings are
+`S360_WEBHOOK_KID_PREVIOUS`, `S360_WEBHOOK_SECRET_PREVIOUS`,
+`SLACK_SIGNING_SECRET_PREVIOUS`, `S360_REFERENCE_STATE_FILE`, `HOST`, and
+`PORT`. Previous Simply360 key ID/secret values must be present as a pair.
+The default state file is `.local/reference-state.json`; it contains OAuth
+credentials and is suitable only for the single-process local proof. Never
+copy it into source control, share it, or use it as a hosted credential store.
+
+The service exposes:
+
+```text
+GET    /health
+POST   /installations
+GET    /setup
+GET    /setup/status
+POST   /setup
+POST   /oauth/simply360/start
+GET    /oauth/simply360/callback
+POST   /oauth/simply360/refresh
+POST   /oauth/slack/start
+GET    /oauth/slack/callback
+POST   /oauth/slack/refresh
+POST   /account-links
+DELETE /account-links/:linkSimplyId
+POST   /blueprints/install
+POST   /actions/send-to-channel
+POST   /events/simply360
+POST   /events/slack
+POST   /lifecycle
+DELETE /installations/:teamIntegrationSimplyId
+```
+
+POST callback forms are also retained for the test harness. Real OAuth
+redirects use the GET callback routes and resolve the exact pending
+installation from the one-time state value; callers cannot select an
+installation in the callback.
 
 Generate review assets after checking out the exact commit to submit:
 
@@ -85,10 +151,9 @@ Simply360 public boundary                   Slack public boundary
 │                           │               │                      │
 │ webhook v2 occurrence ────┼──────────────▶│ chat.postMessage     │
 │                           │               │                      │
-│ REMOTE_ACTION_V1 ─────────┼── contract ──▶│ send-to-channel      │
-│                           │    blocked     │ provider behavior    │
-│ REMOTE_TRIGGER_V1 ◀───────┼── contract ───│ signed message       │
-│                           │    blocked     │ shortcut             │
+│ local action harness ─────┼──────────────▶│ send-to-channel      │
+│ local trigger outbox ◀────┼───────────────│ signed message       │
+│                           │               │ shortcut             │
 │ external Blueprint        │               └──────────────────────┘
 └───────────────────────────┘
 ```
@@ -100,7 +165,9 @@ production authorization code.
 
 ## Important security properties
 
-- Raw request bytes are verified before JSON or form decoding.
+- Routing fields are decoded as untrusted input only to select candidate keys
+  or an installation; no side effect occurs until the exact raw bytes pass the
+  appropriate HMAC verification.
 - Simply360 HMAC input is exactly
   `S360-HMAC-V2<LF>t<LF>eventId<LF>deliveryId<LF>attemptId<LF>sha256(rawBody)`.
 - Only a current key and one explicit overlapping previous key are accepted.
@@ -115,9 +182,15 @@ production authorization code.
 - Slack OAuth requests only `chat:write`; no history, admin, user-token, or
   workspace-wide scopes are declared.
 - Action/trigger inputs are closed and bounded, and unknown properties fail.
+- Terminal event/action/trigger/lifecycle results survive process restart, and
+  reuse of an idempotency key with a different request fingerprint fails.
+- Uninstall fences the exact installation before Slack revocation, removes
+  both credential families from local state, deactivates its user links,
+  clears its trigger outbox and operational replay records, detaches only its
+  shared-Blueprint junctions, and leaves siblings active.
 - HTTP clients reject redirects, bound response sizes, and use abort deadlines.
-- Secrets are constructor inputs or external secret-store values; generated
-  assets contain references, never values.
+- Local secrets are constructor/environment inputs and then mode-`0600` state;
+  generated assets contain references, never values.
 
 ## Repository layout
 
@@ -129,9 +202,15 @@ src/
   slack-oauth.ts            least-privilege Slack OAuth and revocation
   slack.ts                  bounded Slack Web API adapter
   runtime.ts                event/action/trigger provider behavior
+  router.ts                 local Request/Response route authority
+  server.ts                 bounded Node HTTP adapter
+  state.ts                  local credential aggregate and durable outcomes
+  public-contracts/         reviewed public-schema snapshot
   testing/                  local Simply360 and Slack provider doubles
 scripts/
   check-public-boundary.mjs static internal-import/credential ratchet
+  check-public-contract-snapshot.mjs
+  sync-public-event-contract.mjs
   generate-reference-assets.mjs
 test/                       lifecycle, crypto, isolation, and failure matrices
 docs/                       provisioning, privacy, terms, review evidence
@@ -155,6 +234,18 @@ When the two public SDKs are published:
    evidence coordinates.
 
 No endpoint name or request shape should be guessed before steps 2–4.
+
+The vendored event-occurrence subset is the one exception: it is generated from
+the authoritative public JSON Schema and pinned by source and selected-variant
+SHA-256. Refresh it only from that artifact:
+
+```bash
+node scripts/sync-public-event-contract.mjs /path/to/event-occurrence-v1.schema.json
+npm run check:public-contract
+```
+
+Refreshing the snapshot also requires an intentional review of the pinned
+digests in `scripts/check-public-contract-snapshot.mjs`.
 
 ## License
 
