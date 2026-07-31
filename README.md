@@ -23,7 +23,8 @@ Implemented and tested locally:
   overlap, replay-window checks, coordinate checks, and delivery dedupe;
 - an allowlisted event summary that never forwards arbitrary record payload
   fields into Slack;
-- least-privilege Slack OAuth (`chat:write` only), token revocation, and a
+- least-privilege Slack OAuth (`chat:write` plus `commands` for the reviewed
+  message shortcut), token revocation, and a
   bounded `chat.postMessage` adapter;
 - an explicit Slack message shortcut, verified over the raw Slack request with
   the v0 HMAC and replay window, which submits one idempotent
@@ -146,7 +147,8 @@ generated for another commit.
 ```text
 Simply360 public boundary                   Slack public boundary
 ┌───────────────────────────┐               ┌──────────────────────┐
-│ OAuth authorization code  │               │ OAuth v2 chat:write  │
+│ OAuth authorization code  │               │ OAuth v2 chat:write, │
+│                            │               │ commands             │
 │ + S256 PKCE               │               │ auth.revoke          │
 │                           │               │                      │
 │ webhook v2 occurrence ────┼──────────────▶│ chat.postMessage     │
@@ -179,7 +181,8 @@ production authorization code.
 - Slack request signatures are timing-safe and limited to ±300 seconds.
 - Inbound creation requires the explicit `s360_create_record` message shortcut;
   the app does not subscribe to broad message history/events.
-- Slack OAuth requests only `chat:write`; no history, admin, user-token, or
+- Slack OAuth requests only `chat:write` and `commands`; `commands` enables
+  the reviewed message shortcut. No history, admin, user-token, or
   workspace-wide scopes are declared.
 - Action/trigger inputs are closed and bounded, and unknown properties fail.
 - Terminal event/action/trigger/lifecycle results survive process restart, and

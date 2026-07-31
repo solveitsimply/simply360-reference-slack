@@ -199,8 +199,9 @@ const assertSlackCredential = (
     typeof input.botUserId !== 'string' ||
     !/^[UW][A-Z0-9]{8,20}$/u.test(input.botUserId) ||
     !Array.isArray(input.scope) ||
-    input.scope.length !== 1 ||
+    input.scope.length !== 2 ||
     input.scope[0] !== 'chat:write' ||
+    input.scope[1] !== 'commands' ||
     typeof input.refreshToken !== 'string' ||
     !/^xoxe-[A-Za-z0-9-]{10,}$/u.test(input.refreshToken) ||
     !Number.isSafeInteger(input.expiresIn) ||

@@ -82,7 +82,7 @@ export class LocalSlackOAuthDouble implements SlackOAuthTransport {
       refresh_token: refreshToken,
       expires_in: 43_200,
       token_type: 'bot',
-      scope: 'chat:write',
+      scope: 'chat:write,commands',
       bot_user_id: 'U0000BOT1',
       team: { id: this.teamId, name: this.teamName },
     };

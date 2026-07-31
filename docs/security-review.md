@@ -10,7 +10,8 @@ doubles, generated assets, CI, and intended infrastructure boundary.
    required over raw bytes.
 2. Slack → reference runtime: hostile network and form body; Slack v0 HMAC is
    required over raw bytes.
-3. Reference runtime → Slack: OAuth bot token with only `chat:write`.
+3. Reference runtime → Slack: OAuth bot token with `chat:write` and
+   `commands`; the latter is required solely for the reviewed message shortcut.
 4. Reference runtime → local Simply360 trigger outbox: exact,
    request-fingerprinted local proof only; hosted signed ingress remains
    blocked until the public contract exists.

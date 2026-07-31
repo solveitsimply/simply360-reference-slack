@@ -5,13 +5,14 @@ import { assertJsonResponse, readBoundedResponseText } from './http.js';
 
 const ROTATING_SLACK_BOT_TOKEN_PATTERN = /^xoxe\.xoxb-[A-Za-z0-9-]{10,}$/u;
 const SLACK_REFRESH_TOKEN_PATTERN = /^xoxe-[A-Za-z0-9-]{10,}$/u;
+const SLACK_BOT_SCOPES = ['chat:write', 'commands'] as const;
 
 export interface SlackOAuthGrant {
   readonly accessToken: string;
   readonly teamId: string;
   readonly teamName: string;
   readonly botUserId: string;
-  readonly scope: readonly ['chat:write'];
+  readonly scope: typeof SLACK_BOT_SCOPES;
   readonly refreshToken: string;
   readonly expiresIn: number;
 }
@@ -56,7 +57,7 @@ export class SlackOAuthClient {
     const url = new URL('https://slack.com/oauth/v2/authorize');
     url.searchParams.set('client_id', this.config.clientId);
     url.searchParams.set('redirect_uri', this.config.redirectUri);
-    url.searchParams.set('scope', 'chat:write');
+    url.searchParams.set('scope', SLACK_BOT_SCOPES.join(','));
     url.searchParams.set('state', state);
     return { url: url.toString(), state };
   }
@@ -90,7 +91,7 @@ export class SlackOAuthClient {
       typeof value.access_token !== 'string' ||
       !ROTATING_SLACK_BOT_TOKEN_PATTERN.test(value.access_token) ||
       value.token_type !== 'bot' ||
-      value.scope !== 'chat:write' ||
+      !hasExactSlackBotScopes(value.scope) ||
       typeof value.bot_user_id !== 'string' ||
       typeof value.refresh_token !== 'string' ||
       !SLACK_REFRESH_TOKEN_PATTERN.test(value.refresh_token) ||
@@ -115,12 +116,22 @@ export class SlackOAuthClient {
       teamId: (team as Record<string, unknown>).id as string,
       teamName: (team as Record<string, unknown>).name as string,
       botUserId: value.bot_user_id,
-      scope: ['chat:write'],
+      scope: SLACK_BOT_SCOPES,
       refreshToken: value.refresh_token,
       expiresIn: value.expires_in as number,
     };
   }
 }
+
+const hasExactSlackBotScopes = (value: unknown): boolean => {
+  if (typeof value !== 'string') return false;
+  const scopes = value.split(',');
+  return (
+    scopes.length === SLACK_BOT_SCOPES.length &&
+    new Set(scopes).size === SLACK_BOT_SCOPES.length &&
+    SLACK_BOT_SCOPES.every((scope) => scopes.includes(scope))
+  );
+};
 
 export class FetchSlackOAuthTransport implements SlackOAuthTransport {
   public constructor(private readonly fetchImpl: typeof fetch = fetch) {}

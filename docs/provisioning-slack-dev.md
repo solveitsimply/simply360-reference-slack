@@ -50,7 +50,9 @@ a client-credentials grant, a tunnel, or a real Team.
 2. Choose **Create New App** → **From an app manifest**.
 3. Select `Simply360 Developer Test`.
 4. Paste [reference/slack-app-manifest.yaml](../reference/slack-app-manifest.yaml).
-5. Before creating, confirm the only bot scope is `chat:write`.
+5. Before creating, confirm the only bot scopes are `chat:write` and
+   `commands`. Slack requires `commands` for the reviewed message shortcut;
+   it does not grant message-history access.
 6. Confirm there are no user scopes, event subscriptions, admin scopes,
    history scopes, Socket Mode, org-wide deployment, or unreviewed request
    URLs.

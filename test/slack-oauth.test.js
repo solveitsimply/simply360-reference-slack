@@ -2,20 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalSlackOAuthDouble, SlackOAuthClient } from '../dist/index.js';
 
-test('Slack OAuth requests only chat:write, validates state and supports revocation', async () => {
+test('Slack OAuth requests the reviewed bot scopes, validates state and supports revocation', async () => {
   const provider = new LocalSlackOAuthDouble();
   const client = new SlackOAuthClient(provider.clientConfig(), provider);
   const started = client.start();
   const url = new URL(started.url);
   assert.equal(url.origin, 'https://slack.com');
-  assert.equal(url.searchParams.get('scope'), 'chat:write');
+  assert.equal(url.searchParams.get('scope'), 'chat:write,commands');
   assert.equal(url.searchParams.get('state'), started.state);
   client.verifyState(started.state, started.state);
   assert.throws(() => client.verifyState(started.state, `${started.state}x`), /state mismatch/);
 
   const grant = await client.exchange(provider.authorize());
   assert.equal(grant.teamName, 'Simply360 Developer Test');
-  assert.deepEqual(grant.scope, ['chat:write']);
+  assert.deepEqual(grant.scope, ['chat:write', 'commands']);
   assert.equal(provider.isActive(grant.accessToken), true);
   const rotated = await client.refresh(grant.refreshToken);
   assert.notEqual(rotated.accessToken, grant.accessToken);
@@ -34,6 +34,18 @@ test('Slack authorization codes are single use', async () => {
   await assert.rejects(client.exchange(code), /reviewed rotating bot grant/);
 });
 
+test('Slack OAuth rejects a grant that omits the shortcut scope', async () => {
+  const provider = new LocalSlackOAuthDouble();
+  const transport = {
+    exchange: async (input) => ({ ...(await provider.exchange(input)), scope: 'chat:write' }),
+    refresh: (input) => provider.refresh(input),
+    revoke: (accessToken) => provider.revoke(accessToken),
+  };
+  const client = new SlackOAuthClient(provider.clientConfig(), transport);
+
+  await assert.rejects(client.exchange(provider.authorize()), /reviewed rotating bot grant/);
+});
+
 test('Slack token refresh cannot change the bound workspace', async () => {
   const provider = new LocalSlackOAuthDouble('T00000001');
   const transport = {
@@ -44,7 +56,7 @@ test('Slack token refresh cannot change the bound workspace', async () => {
       refresh_token: ['xoxe', 'local', 'workspace', 'change'].join('-'),
       expires_in: 43_200,
       token_type: 'bot',
-      scope: 'chat:write',
+      scope: 'chat:write,commands',
       bot_user_id: 'U0000BOT1',
       team: { id: 'T00000002', name: 'Wrong workspace' },
     }),
