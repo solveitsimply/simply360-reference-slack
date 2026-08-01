@@ -8,6 +8,7 @@ from this document.
 
 - Repository: `solveitsimply/simply360-reference-slack`
 - GitHub repository ID: `1305919064`
+- GitHub repository owner ID: `67548625`
 - Protected branch: `dev`
 - Slack workspace: `Simply360 Developer Test`
 - Slack app: `Simply360 Reference for Slack (Dev)`
@@ -15,6 +16,9 @@ from this document.
 - AWS region: `us-east-1`
 - Stack: `Simply360ReferenceSlackDev`
 - Public origin: `https://reference-slack.dev.simply360.app`
+- Hosted zone: `dev.simply360.app` (`Z0784342XIP781QDXCJA`)
+- Requested certificate:
+  `arn:aws:acm:us-east-1:592668326732:certificate/1a260620-98e8-41e5-9f51-d459b4a154b3`
 - Recurring-cost ceiling: $25/month; expected low-volume range is $2–$10/month
 - Only synthetic publisher-test-Team data is permitted.
 

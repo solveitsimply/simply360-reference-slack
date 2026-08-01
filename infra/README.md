@@ -23,8 +23,11 @@ revoked secret explicitly after the reference installation is removed.
 | Public origin | `https://reference-slack.dev.simply360.app` |
 | GitHub repository | `solveitsimply/simply360-reference-slack` |
 | GitHub repository ID | `1305919064` |
+| GitHub repository owner ID | `67548625` |
 | Branch | protected `dev` only |
 | GitHub environment | `dev` |
+| Hosted zone | `dev.simply360.app` (`Z0784342XIP781QDXCJA`) |
+| Requested certificate | `arn:aws:acm:us-east-1:592668326732:certificate/1a260620-98e8-41e5-9f51-d459b4a154b3` |
 | Secret | `s360/reference-slack/dev/runtime` |
 | Log retention | 7 days |
 | Recurring cost | expected $2–$10/month; stop above $25/month |
@@ -39,6 +42,8 @@ Reuse the organization OIDC provider
 
 - trust audience `sts.amazonaws.com`;
 - bind repository ID `1305919064`;
+- use immutable subject
+  `repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev`;
 - bind the `dev` environment and protected `dev` deployment branch;
 - reject pull-request subjects and all other repositories/branches;
 - grant CloudFormation deployment only to `Simply360ReferenceSlackDev` and its
@@ -82,8 +87,8 @@ the hosted-zone ID, and certificate ARN. This avoids the chicken-and-egg error:
 the GitHub deploy role and the CloudFormation execution role are created by
 that bootstrap stack, so neither may create itself. Record both output role
 ARNs. The protected GitHub `dev` environment must allow only `dev`; the trust
-policy then pins the exact subject
-`repo:solveitsimply/simply360-reference-slack:environment:dev`.
+policy then pins the exact immutable subject
+`repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev`.
 
 After bootstrap, validate locally without deployment:
 

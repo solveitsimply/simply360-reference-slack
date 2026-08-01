@@ -31,7 +31,17 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
+              - Sid: CreateExactHttpApi
+                Effect: Allow
+                Action: apigateway:POST
+                Resource: arn:aws:apigateway:us-east-1::/apis
+                Condition:
+                  StringEquals:
+                    apigateway:Request/ApiName: Simply360ReferenceSlackDev-http
+                  Bool:
+                    apigateway:Request/DisableExecuteApiEndpoint: 'true'
+              - Sid: ManageHttpApiResources
+                Effect: Allow
                 Action:
                   - apigateway:DELETE
                   - apigateway:GET
@@ -39,6 +49,34 @@ Resources:
                   - apigateway:POST
                   - apigateway:PUT
                 Resource: arn:aws:apigateway:us-east-1::/apis/*
+              - Sid: CreateReviewedRegionalDomain
+                Effect: Allow
+                Action:
+                  - apigateway:POST
+                  - apigateway:PUT
+                Resource: arn:aws:apigateway:us-east-1::/domainnames
+                Condition:
+                  ForAllValues:StringEquals:
+                    apigateway:Request/EndpointType: REGIONAL
+                    apigateway:Request/SecurityPolicy: TLS_1_2
+                  'Null':
+                    apigateway:Request/EndpointType: 'false'
+                    apigateway:Request/SecurityPolicy: 'false'
+              - Sid: ManageExactDomainAndMapping
+                Effect: Allow
+                Action:
+                  - apigateway:AddCertificateToDomain
+                  - apigateway:DELETE
+                  - apigateway:GET
+                  - apigateway:PATCH
+                  - apigateway:POST
+                  - apigateway:PUT
+                  - apigateway:RemoveCertificateFromDomain
+                  - apigateway:UpdateDomainNamePolicy
+                Resource:
+                  - arn:aws:apigateway:us-east-1::/domainnames/reference-slack.dev.simply360.app
+                  - arn:aws:apigateway:us-east-1::/domainnames/reference-slack.dev.simply360.app/apimappings
+                  - arn:aws:apigateway:us-east-1::/domainnames/reference-slack.dev.simply360.app/apimappings/*
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -82,7 +120,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:solveitsimply/simply360-reference-slack:environment:dev
+                token.actions.githubusercontent.com:sub: repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev
       Policies:
         - PolicyName: DeployExactDevStack
           PolicyDocument:
