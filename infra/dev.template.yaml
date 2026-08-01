@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Dev-only public-origin and owner-managed-secret foundation for the Simply360
+  Slack reference proof. It deliberately creates no runtime integration until
+  the published Simply360 remote-action and remote-trigger contracts exist.
+
+Parameters:
+  PublicDomainName:
+    Type: String
+    Default: reference-slack.dev.simply360.app
+    AllowedPattern: '^reference-slack\.dev\.simply360\.app$'
+  CertificateArn:
+    Type: String
+    AllowedPattern: '^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$'
+  HostedZoneId:
+    Type: String
+    AllowedPattern: '^Z[A-Z0-9]+$'
+
+Resources:
+  RuntimeSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: s360/reference-slack/dev/runtime
+      Description: Slack and Simply360 reference-dev credentials; owner-managed after stack creation.
+      Tags:
+        - Key: simply360:reference-repository
+          Value: simply360-reference-slack
+        - Key: simply360:environment
+          Value: dev
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/${AWS::StackName}
+      RetentionInDays: 7
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-http
+      ProtocolType: HTTP
+      DisableExecuteApiEndpoint: true
+      Tags:
+        simply360:reference-repository: simply360-reference-slack
+        simply360:environment: dev
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","status":"$context.status","routeKey":"$context.routeKey","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}'
+
+  ApiDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Ref PublicDomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref ApiDomain
+      Stage: !Ref HttpApiStage
+
+  ApiDns:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref PublicDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomain.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomain.RegionalHostedZoneId
+
+Outputs:
+  ApiOrigin:
+    Value: !Sub https://${PublicDomainName}
+  RuntimeSecretArn:
+    Description: Owner writes reviewed Slack and Simply360 values directly here after stack creation.
+    Value: !Ref RuntimeSecret
+  SlackOAuthRedirectUri:
+    Value: !Sub https://${PublicDomainName}/oauth/slack/callback
+  SlackInteractivityRequestUrl:
+    Value: !Sub https://${PublicDomainName}/events/slack
+  Simply360OAuthRedirectUri:
+    Value: !Sub https://${PublicDomainName}/oauth/simply360/callback
+  Simply360EventDestinationUrl:
+    Value: !Sub https://${PublicDomainName}/events/simply360
+  Simply360ActionEndpoint:
+    Value: !Sub https://${PublicDomainName}/actions/send-to-channel
+  Simply360SetupUrl:
+    Value: !Sub https://${PublicDomainName}/setup
+  Simply360LifecycleEndpoint:
+    Value: !Sub https://${PublicDomainName}/lifecycle

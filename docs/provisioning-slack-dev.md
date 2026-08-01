@@ -64,7 +64,9 @@ The message shortcut is explicit user intent. Do not enable
 
 ## 3. Store credentials without copying them into the repository
 
-Create one Secrets Manager JSON secret named exactly:
+After `Simply360ReferenceSlackDev` has been created, use its
+`RuntimeSecretArn` output. It is an initially empty Secrets Manager JSON secret
+named exactly:
 
 ```text
 s360/reference-slack/dev/runtime
@@ -90,9 +92,9 @@ simply360WebhookSecretPrevious
 ```
 
 Use empty/absent `Previous` values until an overlap rotation is in progress.
-Write secret values directly from the provider UI to Secrets Manager. Do not
-paste them into shell history, GitHub variables, issue comments, logs, docs, or
-the generated manifest.
+Write secret values directly from the provider UI to the stack output ARN. Do
+not paste them into CloudFormation parameters, shell history, GitHub variables,
+issue comments, logs, docs, or the generated manifest.
 
 1. In Slack **Basic Information**, copy Client ID, Client Secret, and Signing
    Secret directly into their secret keys.

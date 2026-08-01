@@ -17,7 +17,8 @@
     "assets": "npm run build && node scripts/generate-reference-assets.mjs",
     "check:public-boundary": "node scripts/check-public-boundary.mjs",
     "check:public-contract": "node scripts/check-public-contract-snapshot.mjs",
-    "check": "npm run check:public-boundary && npm run check:public-contract && npm run type-check && npm run test:coverage"
+    "check:infra": "node scripts/check-infra.mjs",
+    "check": "npm run check:public-boundary && npm run check:public-contract && npm run check:infra && npm run type-check && npm run test:coverage"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
