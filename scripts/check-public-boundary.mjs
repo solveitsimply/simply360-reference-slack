@@ -14,10 +14,22 @@ const secretPatterns = [
   /AKIA[0-9A-Z]{16}/u,
 ];
 
+/**
+ * Directories excluded from the walk.
+ *
+ * `.local` holds gitignored runtime state — the default state file is
+ * `.local/reference-state.json`, which by design contains real OAuth
+ * credentials after `npm start`. Scanning it made this gate fail for anyone who
+ * had actually run the app, which is both a false positive (the path is
+ * gitignored and cannot reach the public boundary) and the wrong target: this
+ * check exists to validate committed source, not developer-local state.
+ */
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'generated', '.git', '.local']);
+
 const files = [];
 const walk = async (directory) => {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'generated' || entry.name === '.git') continue;
+    if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await walk(path);
     else if (['.ts', '.js', '.mjs', '.json', '.md', '.yaml', '.yml'].includes(extname(entry.name))) files.push(path);
