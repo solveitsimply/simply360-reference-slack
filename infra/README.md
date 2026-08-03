@@ -1,49 +1,111 @@
-# Infrastructure — intended provisioning (placeholder)
+# NonProd infrastructure target (not provisioned)
 
-This document records the **intended** AWS/GitHub OIDC provisioning for this
-reference proof. **No AWS resources are created by this repository.** Everything
-below is a later provisioning step, owned and rotated by the platform owner.
+No AWS resources are created by this repository today. The exact dev-only
+foundation templates are [`dev.template.yaml`](./dev.template.yaml) and
+[`oidc-roles.template.yaml`](./oidc-roles.template.yaml). They are intentionally
+not deployed by CI. The foundation creates the reviewed HTTPS origin, API
+Gateway access logging, and an empty owner-managed secret container, but no
+Lambda integration or management route. Until public remote-action and
+remote-trigger contracts exist, every route remains an API Gateway 404 rather
+than exposing the loopback-only local harness.
 
-## GitHub OIDC deploy role
+`RuntimeSecret` uses CloudFormation retain policies. Stack deletion cannot
+silently destroy credentials; a reviewed teardown must remove the empty or
+revoked secret explicitly after the reference installation is removed.
 
-Deployments use short-lived credentials via GitHub OIDC — no long-lived AWS
-keys. The IAM role trust must be scoped to **this repository and the `dev`
-branch only**:
+## Ownership and guardrails
 
-- Repository: `solveitsimply/simply360-reference-slack`
-- Trusted subject: `repo:solveitsimply/simply360-reference-slack:ref:refs/heads/dev`
-- OIDC provider: `token.actions.githubusercontent.com` (the org's existing
-  provider is reused)
+| Setting | Required value |
+| --- | --- |
+| AWS account | Simply360 NonProd `592668326732` |
+| Region | `us-east-1` |
+| Stack | `Simply360ReferenceSlackDev` |
+| Public origin | `https://reference-slack.dev.simply360.app` |
+| GitHub repository | `solveitsimply/simply360-reference-slack` |
+| GitHub repository ID | `1305919064` |
+| GitHub repository owner ID | `67548625` |
+| Branch | protected `dev` only |
+| GitHub environment | `dev` |
+| Hosted zone | `dev.simply360.app` (`Z0784342XIP781QDXCJA`) |
+| Requested certificate | `arn:aws:acm:us-east-1:592668326732:certificate/1a260620-98e8-41e5-9f51-d459b4a154b3` |
+| Secret | `s360/reference-slack/dev/runtime` |
+| Log retention | 7 days |
+| Recurring cost | expected $2–$10/month; stop above $25/month |
 
-> Creating or promoting a `main` branch — and any `main`-scoped trust — is
-> reserved for the Production/GA plan under fresh explicit authorization.
+Production, `main`, customer data, paid Slack plans, extra scopes, public
+distribution, and spend above the ceiling require fresh approval.
 
-## NonProd stack and region
+## GitHub OIDC deployment role
 
-| Setting         | Value                        |
-| --------------- | ---------------------------- |
-| Region          | `us-east-1`                  |
-| Dedicated stack | `Simply360ReferenceSlackDev` |
-| Cost profile    | Low-volume Lambda / API Gateway / DynamoDB / SQS, bounded concurrency, 7-day log retention |
+Reuse the organization OIDC provider
+`token.actions.githubusercontent.com`. The role must:
 
-The monorepo-owned dev evidence stack (`Simply360IntegrationMarketplaceEvidenceDev`)
-is separate and not provisioned here. Deployment roles and Secrets Manager paths
-are repository-scoped and owned/rotated by the platform owner.
+- trust audience `sts.amazonaws.com`;
+- bind repository ID `1305919064`;
+- use immutable subject
+  `repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev`;
+- bind the `dev` environment and protected `dev` deployment branch;
+- reject pull-request subjects and all other repositories/branches;
+- grant CloudFormation deployment only to `Simply360ReferenceSlackDev` and its
+  explicitly tagged resources; and
+- use no stored AWS access keys.
 
-## Slack (owned by Jake as sole human operator)
+Because GitHub changes the `sub` claim when a job uses an environment, validate
+the actual token claims from a read-only diagnostic workflow before authoring
+the final trust condition. Do not guess a trust-policy key or weaken it to an
+organization-wide wildcard. The `dev` environment must require the protected
+`dev` branch and must not allow workflow-PR approval.
 
-- Workspace: `Simply360 Developer Test` (dedicated synthetic workspace)
-- App: `Simply360 Reference for Slack (Dev)`
-- Tokens / signing secrets live **only** in the reference stack's Secrets
-  Manager path and follow overlapping rotation. No token material is committed
-  to this repository.
+## Intended low-volume topology
 
-## Cost guardrail
+- Regional API Gateway HTTP API with the exact public routes documented in
+  [Slack provisioning](../docs/provisioning-slack-dev.md).
+- One bounded-concurrency Node 22 Lambda runtime.
+- DynamoDB tables for installation configuration, OAuth state/code metadata,
+  and durable idempotency outcomes; point-in-time recovery enabled, no payload
+  logging.
+- SQS + DLQ only where the published remote-action continuation contract
+  requires asynchronous work. The reviewed `send-to-channel` action is
+  synchronous and must not create a queue by default.
+- a stack-created, initially empty Secrets Manager container named
+  `s360/reference-slack/dev/runtime`; only the owner writes values directly
+  after stack creation.
+- Route-level throttles, WAF/egress controls if required by the final threat
+  model, CloudWatch alarms, metadata-only structured logs, and 7-day retention.
+- Route 53 + ACM for `reference-slack.dev.simply360.app`.
 
-Ratified Direction 40: NonProd recurring cost is capped at **$25/month**
-(expected $2–$10/month). Re-estimate before provisioning and stop above the cap.
+The stack must not enter Amplify's default stacks, a VPC, the Simply360
+database, or internal package/runtime networks. It must be independently
+deletable.
 
-## What is NOT here
+## Bootstrap and intentionally deferred runtime
 
-No credentials, secret values, SSM references, or Simply360 internal
-configuration are stored in this repository (Ratified Direction 9 / 21).
+Bootstrap `oidc-roles.template.yaml` once using an existing NonProd human
+operator/organization bootstrap role—not GitHub—with `CAPABILITY_NAMED_IAM`,
+the existing organization OIDC-provider ARN, the reviewed artifact-bucket ARN,
+the hosted-zone ID, and certificate ARN. This avoids the chicken-and-egg error:
+the GitHub deploy role and the CloudFormation execution role are created by
+that bootstrap stack, so neither may create itself. Record both output role
+ARNs. The protected GitHub `dev` environment must allow only `dev`; the trust
+policy then pins the exact immutable subject
+`repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev`.
+
+After bootstrap, validate locally without deployment:
+
+```bash
+npm run check
+sam validate --lint --template-file infra/dev.template.yaml
+aws cloudformation validate-template --template-body file://infra/oidc-roles.template.yaml
+```
+
+The owner may create the foundation stack only after the approved cost review.
+It outputs the public callback URLs and `RuntimeSecretArn`. Write credentials
+directly to that ARN; never pass a secret value to CloudFormation, GitHub,
+shell history, repository files, or generated assets.
+
+A template around the loopback-only local router would expose unauthenticated
+management routes and harness-only `REMOTE_ACTION_V1` / `REMOTE_TRIGGER_V1`
+shapes. The foundation intentionally creates no such route. A future runtime
+update must be reviewed with published SDK adapters, management-route
+authentication, durable state/idempotency design, IAM policy, route limits,
+cost estimate, and rollback procedure before it is deployed.

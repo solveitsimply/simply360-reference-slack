@@ -6,3 +6,5 @@ dist/
 .env.*
 .DS_Store
 sbom.spdx.json
+generated/
+.local/

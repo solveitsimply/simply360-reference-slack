@@ -11,7 +11,14 @@
   "scripts": {
     "type-check": "tsc --noEmit",
     "build": "tsc",
-    "test": "npm run build && node --test test/*.test.js"
+    "start": "node dist/main.js",
+    "test": "npm run build && node --test test/*.test.js",
+    "test:coverage": "npm run build && node --experimental-test-coverage --test --test-coverage-lines=85 --test-coverage-functions=85 --test-coverage-branches=65 test/*.test.js",
+    "assets": "npm run build && node scripts/generate-reference-assets.mjs",
+    "check:public-boundary": "node scripts/check-public-boundary.mjs",
+    "check:public-contract": "node scripts/check-public-contract-snapshot.mjs",
+    "check:infra": "node scripts/check-infra.mjs",
+    "check": "npm run check:public-boundary && npm run check:public-contract && npm run check:infra && npm run type-check && npm run test:coverage"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
