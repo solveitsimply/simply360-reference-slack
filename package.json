@@ -21,7 +21,7 @@
     "check": "npm run check:public-boundary && npm run check:public-contract && npm run check:infra && npm run type-check && npm run test:coverage"
   },
   "devDependencies": {
-    "@types/node": "^22.10.1",
+    "@types/node": "^26.4.0",
     "typescript": "~5.7.2"
   }
 }
