@@ -5,9 +5,6 @@ Parameters:
   GitHubOidcProviderArn:
     Type: String
     AllowedPattern: '^arn:aws:iam::[0-9]{12}:oidc-provider/token\.actions\.githubusercontent\.com$'
-  ArtifactBucketArn:
-    Type: String
-    AllowedPattern: '^arn:aws:s3:::simply360-reference-slack-dev-[a-z0-9-]+$'
   HostedZoneId:
     Type: String
     AllowedPattern: '^Z[A-Z0-9]+$'
@@ -16,6 +13,52 @@ Parameters:
     AllowedPattern: '^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$'
 
 Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: simply360-reference-slack-dev-592668326732
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: simply360:reference-repository
+          Value: simply360-reference-slack
+        - Key: simply360:environment
+          Value: dev
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
   StackExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -134,8 +177,10 @@ Resources:
                     iam:PassedToService: lambda.amazonaws.com
               - Sid: ReadExactHelloArtifact
                 Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub ${ArtifactBucketArn}/simply360-reference-slack/*
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub ${ArtifactBucket.Arn}/simply360-reference-slack/*
               - Effect: Allow
                 Action:
                   - route53:ChangeResourceRecordSets
@@ -237,10 +282,15 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:GetObjectVersion
                   - s3:PutObject
-                Resource: !Sub ${ArtifactBucketArn}/simply360-reference-slack/*
+                Resource: !Sub ${ArtifactBucket.Arn}/simply360-reference-slack/*
 
 Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  ArtifactBucketArn:
+    Value: !GetAtt ArtifactBucket.Arn
   GitHubDeployRoleArn:
     Value: !GetAtt GitHubDeployRole.Arn
   StackExecutionRoleArn:

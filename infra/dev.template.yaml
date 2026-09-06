@@ -70,7 +70,6 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: simply360-reference-slack-dev-hello-state
       Name: s360/reference-slack/dev/runtime
       Description: Private hello runtime encryption and Simply360 webhook keys; owner-managed after stack creation.
       Tags:
@@ -84,6 +83,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      TableName: simply360-reference-slack-dev-hello-state
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
