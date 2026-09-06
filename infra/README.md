@@ -93,11 +93,15 @@ deletable.
 
 Bootstrap `oidc-roles.template.yaml` once using an existing NonProd human
 operator/organization bootstrap role—not GitHub—with `CAPABILITY_NAMED_IAM`,
-the existing organization OIDC-provider ARN, the reviewed artifact-bucket ARN,
-the hosted-zone ID, and certificate ARN. This avoids the chicken-and-egg error:
+the existing organization OIDC-provider ARN, the hosted-zone ID, and certificate
+ARN. The bootstrap creates the fixed private, versioned artifact bucket
+`simply360-reference-slack-dev-592668326732` with retained teardown custody,
+bucket-owner enforcement, AWS-managed S3 encryption, blocked public access, and
+a TLS-only policy. This avoids the chicken-and-egg error:
 the GitHub deploy role and the CloudFormation execution role are created by
 that bootstrap stack, so neither may create itself. Record all three role
-ARNs. The protected GitHub `dev` environment must allow only `dev`; the trust
+ARNs and the artifact bucket name and ARN. The protected GitHub `dev`
+environment must allow only `dev`; the trust
 policy then pins the exact immutable subject
 `repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev`.
 
@@ -120,7 +124,7 @@ npm run package:hello-lambda
 
 The package command emits `dist-lambda/hello-lambda.zip`, its SHA-256, and byte
 count. Rebuilding unchanged bytes produces the same archive. Upload it once as
-`simply360-reference-slack/<source-sha>/hello-lambda.zip` to the approved
+`simply360-reference-slack/<source-sha>/hello-lambda.zip` to the bootstrap-owned
 versioned artifact bucket. Supply its returned S3 object version through
 `RuntimeArtifactObjectVersion`; the template does not accept an unversioned
 artifact reference.
