@@ -63,6 +63,10 @@ class MemoryHelloOAuthStore {
   credentials = new Map();
   savedCredentials = [];
 
+  constructor(now = Date.now) {
+    this.now = now;
+  }
+
   async createPendingOAuthIntent(state, browserNonce, expiresAt, value) {
     if (this.intents.has(state)) throw new Error('duplicate state');
     this.intents.set(state, { browserNonce, expiresAt, value });
@@ -70,7 +74,7 @@ class MemoryHelloOAuthStore {
 
   async consumePendingOAuthIntent(state, browserNonce) {
     const intent = this.intents.get(state);
-    if (!intent || intent.browserNonce !== browserNonce || intent.expiresAt.getTime() <= Date.now()) {
+    if (!intent || intent.browserNonce !== browserNonce || intent.expiresAt.getTime() <= this.now()) {
       throw new Error('unavailable state');
     }
     this.intents.delete(state);
@@ -110,8 +114,8 @@ const jsonResponse = (value, status = 200) => ({
 });
 
 const startClient = async (fetchImpl) => {
-  const store = new MemoryHelloOAuthStore();
   const now = Date.UTC(2026, 8, 6, 12, 0, 0);
+  const store = new MemoryHelloOAuthStore(() => now);
   const client = new HelloOAuthClient({
     configuration,
     store,
@@ -121,6 +125,29 @@ const startClient = async (fetchImpl) => {
   const started = await client.begin();
   return { client, store, started, now };
 };
+
+test('rejects a pending OAuth intent at its exact injected expiry without calling the token endpoint', async () => {
+  let now = Date.UTC(2026, 8, 6, 12, 0, 0);
+  let calls = 0;
+  const store = new MemoryHelloOAuthStore(() => now);
+  const client = new HelloOAuthClient({
+    configuration,
+    store,
+    fetchImpl: async () => {
+      calls += 1;
+      return jsonResponse(tokenResponse());
+    },
+    now: () => now,
+  });
+  const started = await client.begin();
+  now = Date.parse(started.expiresAt);
+
+  await assert.rejects(
+    client.complete({ state: started.state, browserNonce: started.browserNonce, code: 'expired-code' }),
+    /unavailable state/u,
+  );
+  assert.equal(calls, 0);
+});
 
 test('begins a public NATIVE/NONE S256 flow without caller-selected Team or installation authority', async () => {
   const { store, started, now } = await startClient(async () => {
