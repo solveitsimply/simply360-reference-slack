@@ -291,12 +291,13 @@ test('executes Blueprint lifecycle only from the immediately returned public con
     integrationAppVersionSimplyId: config.integrationAppVersionSimplyId,
     consentFingerprint: `consent.v1.${'9'.repeat(64)}`,
     consentProjection,
-    packages: [{ packageKey: 'hello-records', changeFingerprint: 'e'.repeat(64), changes: [] }],
+    packages: [{ packageKey: 'hello-records', packageVersionSimplyId: 'IBPV-0001-AAAA', operation: 'INSTALL', changeFingerprint: 'e'.repeat(64), changes: [] }],
   };
   const responses = [
     preview,
     { backgroundTaskSimplyId: 'BTAS-0001-AAAA', status: 'QUEUED' },
-    { ...preview, consentProjection: { ...consentProjection, packages: [{ ...consentProjection.packages[0], operation: 'UNINSTALL' }] } },
+    { ...preview, packages: [{ ...preview.packages[0], operation: 'UNINSTALL' }],
+      consentProjection: { ...consentProjection, packages: [{ ...consentProjection.packages[0], operation: 'UNINSTALL' }] } },
     {
       packageKey: 'hello-records',
       packageVersionSimplyId: 'IBPV-0001-AAAA',
@@ -362,4 +363,122 @@ test('rejects an unexpected Blueprint package before execute', async (context) =
   );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.method, 'POST');
+});
+
+const lifecyclePreview = (operation, version = config.integrationAppVersionSimplyId, changes = []) => ({
+  integrationAppVersionSimplyId: version,
+  consentFingerprint: `consent.v1.${'9'.repeat(64)}`,
+  consentProjection: {
+    schemaVersion: 'simply360.external-blueprint-consent/v1',
+    integrationAppVersionSimplyId: version,
+    appPermissionHash: 'a'.repeat(64),
+    packages: [{ packageKey: 'hello-records', packageVersionSimplyId: 'IBPV-0002-AAAA',
+      definitionHash: 'b'.repeat(64), artifactHash: 'c'.repeat(64), appVersionReferenceHash: 'd'.repeat(64),
+      operation, changeFingerprint: 'e'.repeat(64), decisionsHash: 'f'.repeat(64) }],
+  },
+  packages: [{ packageKey: 'hello-records', packageVersionSimplyId: 'IBPV-0002-AAAA', operation,
+    changeFingerprint: 'e'.repeat(64), changes }],
+});
+
+const managedProvenance = (blueprintEntityType, blueprintRef) => ({
+  blueprintEntityType, blueprintRef, ownershipDisposition: 'BLUEPRINT_MANAGED',
+  teamBlueprintSimplyId: 'TBPR-0001-AAAA', blueprintDefinitionSimplyId: 'BPDF-0001-AAAA',
+  blueprintSlug: 'hello-records', blueprintVersionSimplyId: 'BPVR-0002-AAAA', blueprintVersion: '1.0.10',
+});
+const managedCollection = { dataCollectionSimplyId: 'DCOL-0002-AAAA',
+  blueprintProvenance: [managedProvenance('DATA_COLLECTION', 'hello-integration-notes')] };
+const managedField = (title) => ({ dataFieldSimplyId: 'DFLD-0002-AAAA', title: { en: { val: title } },
+  blueprintProvenance: [managedProvenance('DATA_FIELD', 'hello-integration-notes.note')] });
+const driftResult = (drifted) => ({ teamBlueprintSimplyId: 'TBPR-0001-AAAA', drifted, report: { errorCount: 0 } });
+
+const captureResponses = (context, responses) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    assert.ok(responses.length, 'Unexpected extra public API request');
+    return response(responses.shift());
+  };
+  return calls;
+};
+
+test('upgrades with explicit current decisions and an immediately returned target-version projection', async (context) => {
+  const change = { changeId: 'new-managed-collection', allowedDecisions: ['APPLY', 'MAP_EXISTING'], requiresDecision: true };
+  const preview = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]);
+  const calls = captureResponses(context, [preview, { backgroundTaskSimplyId: 'BTAS-0002-AAAA', status: 'QUEUED' }]);
+  const result = await runHelloAcceptanceAction({ config, clients: await clients(), action: {
+    action: 'upgrade-blueprint', targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    decisions: { 'new-managed-collection': { action: 'APPLY' } }, idempotencyKey: 'blueprint-upgrade-0001',
+  } });
+  assert.equal(result.outcome, 'UPGRADE_QUEUED');
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /external-blueprints\/upgrade\/preview$/u);
+  assert.equal(calls[1].init.headers['X-Team-Id'], config.teamSimplyId);
+  assert.equal(calls[1].init.headers['Idempotency-Key'], 'blueprint-upgrade-0001');
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA', decisionsByPackageKey: { 'hello-records': { 'new-managed-collection': { action: 'APPLY' } } },
+    consentFingerprint: preview.consentFingerprint, consentProjection: preview.consentProjection,
+  });
+});
+
+test('refuses missing upgrade choices and wrong operation or target before dispatch', async (context) => {
+  const change = { changeId: 'required-change', allowedDecisions: ['APPLY'], requiresDecision: true };
+  const calls = captureResponses(context, [
+    lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]),
+    lifecyclePreview('INSTALL', 'IAVR-0002-AAAA'),
+    lifecyclePreview('UPGRADE', 'IAVR-9999-ZZZZ'),
+    lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]),
+  ]);
+  const instances = await clients();
+  const action = { action: 'upgrade-blueprint', targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    decisions: {}, idempotencyKey: 'blueprint-upgrade-0002' };
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action }), /every current explicit decision/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action }), /does not match/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action }), /does not match/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances,
+    action: { ...action, decisions: { unrelated: { action: 'APPLY' } } } }), /outside the current preview/u);
+  assert.equal(calls.length, 4);
+  assert.ok(calls.every((call) => call.url.endsWith('/preview')));
+  assert.throws(() => HelloAcceptanceActionSchema.parse({ ...action, decisions: { destructive: { action: 'DELETE' } } }));
+});
+
+test('introduces reversible managed-field drift using only exact public provenance and confirms it', async (context) => {
+  const calls = captureResponses(context, [driftResult(false), [managedCollection], [managedField('Note')],
+    { result: {} }, driftResult(true), [managedCollection], [managedField('Note (private acceptance drift)')]]);
+  const result = await runHelloAcceptanceAction({ config, clients: await clients(), action: { action: 'introduce-blueprint-drift' } });
+  assert.equal(result.outcome, 'DRIFT_CONFIRMED');
+  assert.equal(result.dataFieldSimplyId, 'DFLD-0002-AAAA');
+  assert.equal(calls.filter(({ init }) => init.method === 'PUT').length, 1);
+  assert.match(calls[3].url, /\/v1\/data-fields\/DFLD-0002-AAAA$/u);
+  assert.deepEqual(JSON.parse(calls[3].init.body), { title: { en: 'Note (private acceptance drift)' } });
+  assert.ok(calls.every(({ init }) => init.headers['X-Team-Id'] === config.teamSimplyId));
+});
+
+test('will not mutate existing drift, ambiguous ownership, or a changed field title', async (context) => {
+  const calls = captureResponses(context, [driftResult(true), driftResult(false), [managedCollection, managedCollection],
+    driftResult(false), [managedCollection], [managedField('Unrelated edit')]]);
+  const instances = await clients();
+  const invoke = () => runHelloAcceptanceAction({ config, clients: instances, action: { action: 'introduce-blueprint-drift' } });
+  await assert.rejects(invoke(), /requires a clean/u);
+  await assert.rejects(invoke(), /exactly one reviewed integration-owned collection/u);
+  await assert.rejects(invoke(), /field title has changed/u);
+  assert.ok(calls.every(({ init }) => init.method === 'GET'));
+});
+
+test('reconciles using fresh consent and verifies both no drift and restored managed title', async (context) => {
+  const preview = lifecyclePreview('RECONCILE');
+  const calls = captureResponses(context, [preview, driftResult(false), driftResult(false), [managedCollection], [managedField('Note')]]);
+  const result = await runHelloAcceptanceAction({ config, clients: await clients(), action: { action: 'reconcile-blueprint' } });
+  assert.equal(result.outcome, 'RECONCILED');
+  assert.deepEqual(JSON.parse(calls[1].init.body), { consentFingerprint: preview.consentFingerprint,
+    consentProjection: preview.consentProjection });
+  assert.equal(result.drifted, false);
+  assert.equal(result.dataFieldSimplyId, 'DFLD-0002-AAAA');
+});
+
+test('does not claim successful reconciliation when public readback retains drift', async (context) => {
+  captureResponses(context, [lifecyclePreview('RECONCILE'), driftResult(false), driftResult(true), [managedCollection], [managedField('Note')]]);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: await clients(), action: { action: 'reconcile-blueprint' } }),
+    /did not restore/u);
 });

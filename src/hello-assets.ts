@@ -21,6 +21,12 @@ const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 export const HELLO_APP_SLUG = 'marketplace-hello-app';
 export const HELLO_PUBLISHER_SLUG = 'hello-app-dev-publisher';
 export const HELLO_BLUEPRINT_PACKAGE_KEY = 'hello-records';
+export const HELLO_BASELINE_SOURCE_COMMIT = '3848891be5a4a2810353765675a3d2cb9e136546';
+export const HELLO_BASELINE_SEMANTIC_VERSION = '1.0.9';
+export const HELLO_UPGRADE_SEMANTIC_VERSION = '1.0.10';
+export const HELLO_MANAGED_COLLECTION_REF = 'hello-integration-notes';
+export const HELLO_MANAGED_FIELD_REF = 'hello-integration-notes.note';
+export const HELLO_MANAGED_FIELD_TITLE = 'Note';
 export const HELLO_SERVICE_CLIENT_KEY = 'hello-app-dev';
 export const HELLO_USER_CLIENT_KEY = 'hello-app-dev-user';
 export const HELLO_SERVICE_CLIENT_ID = 's360_marketplace_server_dev_hello01';
@@ -43,12 +49,107 @@ export const HELLO_LIFECYCLE_EVENT_TYPES = [
   'app.grant.revoked',
   'app.account-link.revoked',
 ] as const;
+export const HELLO_UPGRADE_LIFECYCLE_EVENT_TYPES = [...HELLO_LIFECYCLE_EVENT_TYPES, 'app.upgrade.completed'] as const;
+
+const HELLO_MANAGED_FIELD_KEY = 'note';
 
 export interface HelloAcceptanceBundle {
   readonly manifest: AppManifestV1;
   readonly blueprintPackage: Awaited<ReturnType<typeof buildExternalBlueprintPackage>>;
   readonly blueprintPackageSha256: string;
 }
+
+const helloRecordsCollection = () =>
+  defineCollection({
+    collectionKey: 'hello-records',
+    label: { en: 'Hello records' },
+    description: { en: 'Synthetic records used only for private integration acceptance.' },
+    lifecycleOwner: 'TEAM',
+    recordLifecycle: 'ACTIVE_ONLY',
+    calculatedName: formulaField('title'),
+    fields: [
+      defineField({ kind: 'TEXT', fieldKey: 'title', label: { en: 'Title' }, required: true, maxLength: 200 }),
+      defineField({ kind: 'DATE', fieldKey: 'greeted-on', label: { en: 'Greeted on' }, required: false }),
+      defineField({ kind: 'BOOLEAN', fieldKey: 'greeted', label: { en: 'Greeted' }, required: false }),
+    ],
+    sharedContractKeys: [],
+  });
+
+const integrationOwnedNotesCollection = () =>
+  defineCollection({
+    collectionKey: HELLO_MANAGED_COLLECTION_REF,
+    label: { en: 'Hello integration notes' },
+    description: { en: 'Synthetic integration-owned state used only for private upgrade acceptance.' },
+    lifecycleOwner: 'INTEGRATION',
+    recordLifecycle: 'ACTIVE_ONLY',
+    calculatedName: formulaField(HELLO_MANAGED_FIELD_KEY),
+    fields: [
+      defineField({
+        kind: 'TEXT',
+        fieldKey: HELLO_MANAGED_FIELD_KEY,
+        label: { en: HELLO_MANAGED_FIELD_TITLE },
+        required: false,
+        maxLength: 200,
+      }),
+    ],
+    sharedContractKeys: [],
+  });
+
+const helloBlueprintDefinition = (input: { readonly sourceCommit: string; readonly semanticVersion: string }) => {
+  if (input.semanticVersion === HELLO_BASELINE_SEMANTIC_VERSION) {
+    if (input.sourceCommit !== HELLO_BASELINE_SOURCE_COMMIT) {
+      throw new Error('the reviewed 1.0.9 definition is bound to its historical source commit');
+    }
+    return defineExternalBlueprint({
+      collections: [helloRecordsCollection()],
+      smartCollections: [],
+      dataViews: [],
+      reports: [],
+      labels: [],
+      sharedCollectionContracts: [],
+      mappings: [],
+      options: [],
+      lifecycle: [
+        defineLifecycleDeclaration({
+          resourceType: 'COLLECTION',
+          collectionKey: 'hello-records',
+          owner: 'TEAM',
+          uninstallBehavior: 'PRESERVE',
+        }),
+      ],
+    });
+  }
+  if (input.semanticVersion === HELLO_UPGRADE_SEMANTIC_VERSION) {
+    if (input.sourceCommit === HELLO_BASELINE_SOURCE_COMMIT) {
+      throw new Error('the reviewed 1.0.10 definition requires a successor source commit');
+    }
+    return defineExternalBlueprint({
+      collections: [helloRecordsCollection(), integrationOwnedNotesCollection()],
+      smartCollections: [],
+      dataViews: [],
+      reports: [],
+      labels: [],
+      sharedCollectionContracts: [],
+      mappings: [],
+      options: [],
+      lifecycle: [
+        defineLifecycleDeclaration({
+          resourceType: 'COLLECTION',
+          collectionKey: 'hello-records',
+          owner: 'TEAM',
+          uninstallBehavior: 'PRESERVE',
+        }),
+        defineLifecycleDeclaration({
+          resourceType: 'COLLECTION',
+          collectionKey: HELLO_MANAGED_COLLECTION_REF,
+          owner: 'INTEGRATION',
+          uninstallBehavior: 'PRESERVE',
+        }),
+      ],
+    });
+  }
+  throw new Error('semanticVersion must select the reviewed 1.0.9 baseline or 1.0.10 upgrade definition');
+};
 
 export const buildHelloAcceptanceBundle = async (input: {
   readonly sourceCommit: string;
@@ -58,39 +159,7 @@ export const buildHelloAcceptanceBundle = async (input: {
     throw new Error('sourceCommit must be the exact lowercase 40-character Git SHA');
   }
 
-  const definition = defineExternalBlueprint({
-    collections: [
-      defineCollection({
-        collectionKey: 'hello-records',
-        label: { en: 'Hello records' },
-        description: { en: 'Synthetic records used only for private integration acceptance.' },
-        lifecycleOwner: 'TEAM',
-        recordLifecycle: 'ACTIVE_ONLY',
-        calculatedName: formulaField('title'),
-        fields: [
-          defineField({ kind: 'TEXT', fieldKey: 'title', label: { en: 'Title' }, required: true, maxLength: 200 }),
-          defineField({ kind: 'DATE', fieldKey: 'greeted-on', label: { en: 'Greeted on' }, required: false }),
-          defineField({ kind: 'BOOLEAN', fieldKey: 'greeted', label: { en: 'Greeted' }, required: false }),
-        ],
-        sharedContractKeys: [],
-      }),
-    ],
-    smartCollections: [],
-    dataViews: [],
-    reports: [],
-    labels: [],
-    sharedCollectionContracts: [],
-    mappings: [],
-    options: [],
-    lifecycle: [
-      defineLifecycleDeclaration({
-        resourceType: 'COLLECTION',
-        collectionKey: 'hello-records',
-        owner: 'TEAM',
-        uninstallBehavior: 'PRESERVE',
-      }),
-    ],
-  });
+  const definition = helloBlueprintDefinition(input);
   validateExternalBlueprintDefinition(definition);
   const blueprintPackage = await buildExternalBlueprintPackage(definition, {
     publisherSlug: HELLO_PUBLISHER_SLUG,
@@ -183,7 +252,11 @@ export const buildHelloAcceptanceBundle = async (input: {
         endpointKey: 'lifecycle',
         exactUrl: `${RUNTIME_ORIGIN}/lifecycle`,
         protocolVersion: 1,
-        eventTypes: [...HELLO_LIFECYCLE_EVENT_TYPES],
+        eventTypes: [
+          ...(input.semanticVersion === HELLO_UPGRADE_SEMANTIC_VERSION
+            ? HELLO_UPGRADE_LIFECYCLE_EVENT_TYPES
+            : HELLO_LIFECYCLE_EVENT_TYPES),
+        ],
       },
     },
     support: {

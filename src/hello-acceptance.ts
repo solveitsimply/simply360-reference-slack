@@ -1,4 +1,8 @@
-import { Simply360, type ExternalBlueprintRuntimePreview } from '@simply360/sdk';
+import {
+  Simply360,
+  type ExternalBlueprintRuntimeOperation,
+  type ExternalBlueprintRuntimePreview,
+} from '@simply360/sdk';
 import {
   MarketplaceUserDelegatedAuthorizationIdentitySchema,
   type MarketplaceUserDelegatedAuthorizationIdentity,
@@ -7,6 +11,9 @@ import { z } from 'zod';
 
 import {
   HELLO_BLUEPRINT_PACKAGE_KEY,
+  HELLO_MANAGED_COLLECTION_REF,
+  HELLO_MANAGED_FIELD_REF,
+  HELLO_MANAGED_FIELD_TITLE,
   HELLO_PROVIDER_PERMISSIONS,
   HELLO_USER_CLIENT_ID,
   HELLO_USER_SCOPES,
@@ -17,6 +24,11 @@ const SimplyIdSchema = z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/u
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9._:~-]{8,191}$/u);
 const TitleSchema = z.string().trim().min(1).max(200);
+const UpgradeDecisionsSchema = z.record(z.string().min(1).max(300), z.discriminatedUnion('action', [
+  z.object({ action: z.literal('APPLY') }).strict(),
+  z.object({ action: z.literal('MAP_EXISTING'), mappedEntitySimplyId: SimplyIdSchema }).strict(),
+]));
+const HELLO_DRIFT_FIELD_TITLE = 'Note (private acceptance drift)';
 
 export const HelloAcceptanceConfigSchema = z.object({
   schemaVersion: z.literal('simply360.hello-acceptance-config/v1'),
@@ -60,6 +72,21 @@ export const HelloAcceptanceActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('install-blueprint'), idempotencyKey: IdempotencyKeySchema }).strict(),
   z.object({ action: z.literal('preview-blueprint-uninstall') }).strict(),
   z.object({ action: z.literal('uninstall-blueprint') }).strict(),
+  z.object({ action: z.literal('inspect-blueprint-drift') }).strict(),
+  z.object({ action: z.literal('introduce-blueprint-drift') }).strict(),
+  z.object({ action: z.literal('preview-blueprint-reconcile') }).strict(),
+  z.object({ action: z.literal('reconcile-blueprint') }).strict(),
+  z.object({
+    action: z.literal('preview-blueprint-upgrade'),
+    targetIntegrationAppVersionSimplyId: SimplyIdSchema,
+    decisions: UpgradeDecisionsSchema,
+  }).strict(),
+  z.object({
+    action: z.literal('upgrade-blueprint'),
+    targetIntegrationAppVersionSimplyId: SimplyIdSchema,
+    decisions: UpgradeDecisionsSchema,
+    idempotencyKey: IdempotencyKeySchema.max(64),
+  }).strict(),
   z.object({ action: z.literal('background-task-status'), backgroundTaskSimplyId: SimplyIdSchema }).strict(),
 ]);
 
@@ -171,19 +198,51 @@ const uninstallDecisions = (): Record<string, 'PRESERVE'> => ({
 const exactPreviewPackage = (
   config: HelloAcceptanceConfig,
   preview: ExternalBlueprintRuntimePreview,
+  operation: ExternalBlueprintRuntimeOperation,
+  versionSimplyId = config.integrationAppVersionSimplyId,
 ): ExternalBlueprintRuntimePreview['packages'][0] => {
   const projectedPackages = preview.consentProjection.packages;
   if (
-    preview.integrationAppVersionSimplyId !== config.integrationAppVersionSimplyId ||
-    preview.consentProjection.integrationAppVersionSimplyId !== config.integrationAppVersionSimplyId ||
+    preview.integrationAppVersionSimplyId !== versionSimplyId ||
+    preview.consentProjection.integrationAppVersionSimplyId !== versionSimplyId ||
     preview.packages.length !== 1 ||
     preview.packages[0].packageKey !== config.blueprintPackageKey ||
     projectedPackages.length !== 1 ||
-    projectedPackages[0].packageKey !== config.blueprintPackageKey
+    projectedPackages[0].packageKey !== config.blueprintPackageKey ||
+    preview.packages[0].operation !== operation ||
+    projectedPackages[0].operation !== operation ||
+    preview.packages[0].packageVersionSimplyId !== projectedPackages[0].packageVersionSimplyId ||
+    preview.packages[0].changeFingerprint !== projectedPackages[0].changeFingerprint
   ) {
     throw new Error('Blueprint preview does not match the selected app version and package');
   }
   return preview.packages[0];
+};
+
+/** Discover only the reviewed managed field through public Blueprint provenance. */
+const readManagedField = async (clients: HelloAcceptanceClients, teamBlueprintSimplyId: string) => {
+  const collections = await clients.admin.dataCollections.list();
+  const owned = collections.data.filter((item) => item.blueprintProvenance.some((source) =>
+    source.teamBlueprintSimplyId === teamBlueprintSimplyId &&
+    source.blueprintEntityType === 'DATA_COLLECTION' &&
+    source.blueprintRef === HELLO_MANAGED_COLLECTION_REF &&
+    source.ownershipDisposition === 'BLUEPRINT_MANAGED'));
+  if (owned.length !== 1) throw new Error('Expected exactly one reviewed integration-owned collection');
+  const collection = owned[0]!;
+  const fields = await clients.admin.dataCollections.listFields(collection.dataCollectionSimplyId);
+  const selected = fields.data.filter((item) => item.blueprintProvenance.some((source) =>
+    source.teamBlueprintSimplyId === teamBlueprintSimplyId &&
+    source.blueprintEntityType === 'DATA_FIELD' &&
+    source.blueprintRef === HELLO_MANAGED_FIELD_REF &&
+    source.ownershipDisposition === 'BLUEPRINT_MANAGED'));
+  if (selected.length !== 1) throw new Error('Expected exactly one reviewed integration-owned field');
+  return { collection, field: selected[0]! };
+};
+
+const englishTitle = (title: import('@simply360/sdk').PublicLocalizedText): string | undefined => {
+  if (typeof title === 'string') return title;
+  const english = title?.en;
+  return typeof english === 'string' ? english : english?.val;
 };
 
 export const runHelloAcceptanceAction = async (input: {
@@ -288,7 +347,7 @@ export const runHelloAcceptanceAction = async (input: {
         config.teamIntegrationSimplyId,
         installPreviewBody(config),
       );
-      const selectedPackage = exactPreviewPackage(config, response.data);
+      const selectedPackage = exactPreviewPackage(config, response.data, 'INSTALL');
       return {
         outcome: 'PREVIEWED',
         consentFingerprint: response.data.consentFingerprint,
@@ -303,7 +362,7 @@ export const runHelloAcceptanceAction = async (input: {
         config.teamIntegrationSimplyId,
         installPreviewBody(config),
       );
-      exactPreviewPackage(config, preview.data);
+      exactPreviewPackage(config, preview.data, 'INSTALL');
       const response = await clients.admin.blueprints.installExternal(config.teamIntegrationSimplyId, {
         ...installPreviewBody(config),
         consentFingerprint: preview.data.consentFingerprint,
@@ -321,7 +380,7 @@ export const runHelloAcceptanceAction = async (input: {
         config.blueprintPackageKey,
         { decisions: uninstallDecisions() },
       );
-      const selectedPackage = exactPreviewPackage(config, response.data);
+      const selectedPackage = exactPreviewPackage(config, response.data, 'UNINSTALL');
       return {
         outcome: 'UNINSTALL_PREVIEWED',
         consentFingerprint: response.data.consentFingerprint,
@@ -337,7 +396,7 @@ export const runHelloAcceptanceAction = async (input: {
         config.blueprintPackageKey,
         { decisions: uninstallDecisions() },
       );
-      exactPreviewPackage(config, preview.data);
+      exactPreviewPackage(config, preview.data, 'UNINSTALL');
       const response = await clients.admin.blueprints.uninstallExternal(
         config.teamIntegrationSimplyId,
         config.blueprintPackageKey,
@@ -354,6 +413,73 @@ export const runHelloAcceptanceAction = async (input: {
         teamBlueprintSimplyId: response.data.teamBlueprintSimplyId,
         requestId: response.meta.requestId,
       };
+    }
+    case 'inspect-blueprint-drift': {
+      const response = await clients.admin.blueprints.inspectExternalDrift(config.teamIntegrationSimplyId, config.blueprintPackageKey);
+      return {
+        outcome: 'DRIFT_READ',
+        teamBlueprintSimplyId: response.data.teamBlueprintSimplyId,
+        drifted: response.data.drifted,
+        errorCount: response.data.report.errorCount,
+        requestId: response.meta.requestId,
+      };
+    }
+    case 'introduce-blueprint-drift': {
+      const before = await clients.admin.blueprints.inspectExternalDrift(config.teamIntegrationSimplyId, config.blueprintPackageKey);
+      if (before.data.drifted || before.data.report.errorCount !== 0) throw new Error('Drift proof requires a clean installed Blueprint');
+      const selected = await readManagedField(clients, before.data.teamBlueprintSimplyId);
+      if (englishTitle(selected.field.title) !== HELLO_MANAGED_FIELD_TITLE) throw new Error('Reviewed field title has changed');
+      await clients.admin.dataFields.update(selected.field.dataFieldSimplyId, { title: { en: HELLO_DRIFT_FIELD_TITLE } });
+      const after = await clients.admin.blueprints.inspectExternalDrift(config.teamIntegrationSimplyId, config.blueprintPackageKey);
+      const readback = await readManagedField(clients, before.data.teamBlueprintSimplyId);
+      if (!after.data.drifted || after.data.teamBlueprintSimplyId !== before.data.teamBlueprintSimplyId ||
+          after.data.report.errorCount !== 0 || readback.field.dataFieldSimplyId !== selected.field.dataFieldSimplyId ||
+          englishTitle(readback.field.title) !== HELLO_DRIFT_FIELD_TITLE) throw new Error('Drift mutation requires exact readback');
+      return { outcome: 'DRIFT_CONFIRMED', teamBlueprintSimplyId: before.data.teamBlueprintSimplyId,
+        dataCollectionSimplyId: selected.collection.dataCollectionSimplyId, dataFieldSimplyId: selected.field.dataFieldSimplyId,
+        requestId: after.meta.requestId };
+    }
+    case 'preview-blueprint-reconcile':
+    case 'reconcile-blueprint': {
+      const preview = await clients.admin.blueprints.previewExternalReconcile(config.teamIntegrationSimplyId, config.blueprintPackageKey);
+      const selected = exactPreviewPackage(config, preview.data, 'RECONCILE');
+      if (action.action === 'preview-blueprint-reconcile') return {
+        outcome: 'RECONCILE_PREVIEWED', consentFingerprint: preview.data.consentFingerprint,
+        changes: selected.changes, requestId: preview.meta.requestId,
+      };
+      const response = await clients.admin.blueprints.reconcileExternal(config.teamIntegrationSimplyId, config.blueprintPackageKey, {
+        consentFingerprint: preview.data.consentFingerprint, consentProjection: preview.data.consentProjection,
+      });
+      const after = await clients.admin.blueprints.inspectExternalDrift(config.teamIntegrationSimplyId, config.blueprintPackageKey);
+      const readback = await readManagedField(clients, response.data.teamBlueprintSimplyId);
+      if (after.data.drifted || after.data.report.errorCount !== 0 || response.data.report.errorCount !== 0 ||
+          after.data.teamBlueprintSimplyId !== response.data.teamBlueprintSimplyId ||
+          englishTitle(readback.field.title) !== HELLO_MANAGED_FIELD_TITLE) throw new Error('Reconcile did not restore the reviewed managed field');
+      return { outcome: 'RECONCILED', teamBlueprintSimplyId: response.data.teamBlueprintSimplyId,
+        dataFieldSimplyId: readback.field.dataFieldSimplyId, drifted: false, requestId: response.meta.requestId };
+    }
+    case 'preview-blueprint-upgrade':
+    case 'upgrade-blueprint': {
+      const body = { targetIntegrationAppVersionSimplyId: action.targetIntegrationAppVersionSimplyId,
+        decisionsByPackageKey: { [config.blueprintPackageKey]: action.decisions } };
+      const preview = await clients.admin.blueprints.previewExternalUpgrade(config.teamIntegrationSimplyId, body);
+      const selected = exactPreviewPackage(config, preview.data, 'UPGRADE', action.targetIntegrationAppVersionSimplyId);
+      if (action.action === 'preview-blueprint-upgrade') return {
+        outcome: 'UPGRADE_PREVIEWED', consentFingerprint: preview.data.consentFingerprint,
+        changes: selected.changes, requestId: preview.meta.requestId,
+      };
+      for (const [changeId, decision] of Object.entries(action.decisions)) {
+        const change = selected.changes.find((item) => item.changeId === changeId);
+        if (!change || !change.allowedDecisions.includes(decision.action)) throw new Error('Upgrade decision is outside the current preview');
+      }
+      if (selected.changes.some((change) => change.requiresDecision && !action.decisions[change.changeId])) {
+        throw new Error('Upgrade requires every current explicit decision');
+      }
+      const response = await clients.admin.blueprints.upgradeExternal(config.teamIntegrationSimplyId, {
+        ...body, consentFingerprint: preview.data.consentFingerprint, consentProjection: preview.data.consentProjection,
+      }, action.idempotencyKey);
+      return { outcome: 'UPGRADE_QUEUED', backgroundTaskSimplyId: response.data.backgroundTaskSimplyId,
+        requestId: response.meta.requestId };
     }
     case 'background-task-status': {
       const response = await clients.admin.backgroundTasks.get(action.backgroundTaskSimplyId);
