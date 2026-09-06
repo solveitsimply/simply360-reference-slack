@@ -21,6 +21,12 @@ consent page. Only the token endpoint's validated public
 `authorization_binding` selects the encrypted, exact-grant credential
 namespace after callback.
 
+The vendored `@simply360/sdk` archive was rebuilt from the clean published
+Simply360 candidate `b5ab185ba03ce6f68dcbaa7abff3b6933e223690`, whose SDK
+source tree is `2f70824daef4dc668efe4f4e2be1403bd7ef6914`. The archive
+SHA-256 is
+`a16f5ba0af3246f218bce065c2445531a5f6bbec197ad5026f05ff0876d8f8fe`.
+
 The source, provider-neutral manifest and Blueprint generator, public-SDK
 acceptance driver, exact-five-route Lambda adapter, bounded infrastructure, and
 local tests are ready. Private app coordinates, immutable artifact upload,
@@ -66,10 +72,11 @@ Blueprint/list/revoke calls send the public Team Simply ID header.
 
 The available read-only commands are `read-records`, `list-provider-links`,
 `preview-blueprint-install`, `preview-blueprint-uninstall`,
-`preview-blueprint-upgrade`, `inspect-blueprint-drift`,
+`preview-blueprint-upgrade`, `preview-installation-version-upgrade`, `inspect-blueprint-drift`,
 `preview-blueprint-reconcile`, and `background-task-status`.
 `user-write-record`, `service-write-record`, `attest-provider-link`,
-`revoke-provider-link`, `install-blueprint`, `upgrade-blueprint`,
+`revoke-provider-link`, `install-blueprint`, `upgrade-blueprint`, `apply-installation-version-upgrade`,
+`replay-installation-version-upgrade-commit`,
 `introduce-blueprint-drift`, `reconcile-blueprint`, and `uninstall-blueprint`
 require an explicit `--apply`; every retryable mutation also requires its
 public idempotency key. Install, upgrade, reconcile, and uninstall execute only
@@ -103,15 +110,59 @@ These commands do not replace installation-version consent. Before the
 Blueprint upgrade, publish and complete REVIEW/FINAL for the exact `1.0.10`
 manifest and package, then use the protected Public API with a recently
 authenticated Team Admin to preview and commit the target installation version
-for each shared sibling. After each package link reaches the target version,
+for each shared sibling separately. The driver reads the exact persisted role
+selection, requires the reviewed source epoch and authority revision, creates a
+fresh combined Blueprint preview, and passes that projection directly into the
+version-consent preview. Its apply action seals the fresh CSRF value in the
+private recovery packet and commits once with the supplied idempotency key:
+
+```bash
+npm run build
+node scripts/run-hello-acceptance.mjs preview-installation-version-upgrade --config "$HELLO_CONFIG" \
+  --source-epoch-simply-id "$SOURCE_INTEGRATION_INSTALLATION_EPOCH_SIMPLY_ID" \
+  --expected-authority-revision "$SOURCE_AUTHORITY_REVISION" \
+  --target-app-version-simply-id "$TARGET_INTEGRATION_APP_VERSION_SIMPLY_ID" \
+  --decisions-path "$HELLO_UPGRADE_DECISIONS" > "$HELLO_INSTALLATION_VERSION_UPGRADE_REVIEW"
+node scripts/run-hello-acceptance.mjs apply-installation-version-upgrade --config "$HELLO_CONFIG" \
+  --source-epoch-simply-id "$SOURCE_INTEGRATION_INSTALLATION_EPOCH_SIMPLY_ID" \
+  --expected-authority-revision "$SOURCE_AUTHORITY_REVISION" \
+  --target-app-version-simply-id "$TARGET_INTEGRATION_APP_VERSION_SIMPLY_ID" \
+  --decisions-path "$HELLO_UPGRADE_DECISIONS" \
+  --reviewed-effects-path "$HELLO_INSTALLATION_VERSION_UPGRADE_REVIEW" \
+  --recovery-packet-path "$HELLO_INSTALLATION_VERSION_UPGRADE_RECOVERY_PACKET" \
+  --idempotency-key "$HELLO_INSTALLATION_VERSION_UPGRADE_IDEMPOTENCY_KEY" --apply
+```
+
+Keep the review and private recovery files outside the repository. Invoke the
+script directly after building so the redirected review contains only JSON.
+The review output binds the exact sorted shared-sibling set, grant and account-link
+effects, persisted-role hash, and full Blueprint consent projection. Apply creates
+the recovery packet as a new owner-only `0600` file before its single commit
+request. If that request loses its response, do not run apply again. Replay the
+exact original preview, CSRF value, and idempotency key from the private packet:
+
+```bash
+node scripts/run-hello-acceptance.mjs replay-installation-version-upgrade-commit \
+  --config "$HELLO_CONFIG" \
+  --recovery-packet-path "$HELLO_INSTALLATION_VERSION_UPGRADE_RECOVERY_PACKET" --apply
+```
+
+Both successful apply and replay verify the returned consent and operation public
+identifiers, exact reviewed effect counts, and a public readback of the selected
+installation at the target version. Their standard output contains only metadata;
+the CSRF value and idempotency key remain in the private recovery packet.
+
+Repeat those two commands with the separately reviewed config and current
+source coordinates for the other shared sibling. After each package link reaches the target version,
 the platform finalizer must revalidate every shared target package link, resume
 the exact upgrade operation, activate the target epoch, and issue its service
 grant. Update the hosted runtime's exact version, release, client, and
 webhook-key bindings from those reviewed public receipts before beginning fresh
 target-version user OAuth; only then renew the affected external account links.
-Fresh OAuth does not activate the installation epoch. The current vendored
-platform SDK predates those installation-version methods; repack it from the
-immutable upgraded platform candidate before attempting these steps.
+Fresh OAuth does not activate the installation epoch. The vendored platform SDK
+contains the installation-version methods from the immutable candidate recorded
+above; live use must still bind the final accepted platform and external-app
+artifacts to the reviewed execution receipts.
 
 ## Legacy full-provider status
 

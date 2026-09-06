@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
   HelloAcceptanceActionSchema,
   HelloAcceptanceConfigSchema,
+  HelloInstallationVersionUpgradeCommitPacketSchema,
   HelloLifecycleFencedError,
   bindHelloAcceptanceUserCredential,
   createHelloAcceptanceClients,
+  createHelloInstallationVersionUpgradePacketFileStore,
+  readHelloInstallationVersionUpgradeCommitPacket,
   runHelloAcceptanceAction,
 } from '../dist/index.js';
 
@@ -380,6 +388,149 @@ const lifecyclePreview = (operation, version = config.integrationAppVersionSimpl
     changeFingerprint: 'e'.repeat(64), changes }],
 });
 
+const currentRoleSelection = (overrides = {}) => ({
+  teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+  integrationAppVersionSimplyId: config.integrationAppVersionSimplyId,
+  integrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+  authorityRevision: 7,
+  roleSelection: {
+    schemaVersion: 'simply360.integration-installation-role-snapshot/v1',
+    collections: [{
+      dataCollectionSimplyId: config.dataCollectionSimplyId,
+      defaultFieldPermissionType: 'ALLOW_UPDATE',
+      actions: ['CREATE_RECORDS', 'READ_RECORD_METADATA'],
+    }],
+    fields: [{
+      dataFieldSimplyId: config.titleDataFieldSimplyId,
+      dataCollectionSimplyId: config.dataCollectionSimplyId,
+      permissionType: 'ALLOW_UPDATE',
+    }],
+    features: [],
+  },
+  ...overrides,
+});
+
+const compareCodeUnits = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
+const canonicalJson = (value) => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value).sort(([left], [right]) => compareCodeUnits(left, right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+const hash = (value) => createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
+
+const reviewedEffects = (blueprint, overrides = {}) => ({
+  schemaVersion: 'simply360.hello-installation-version-upgrade-reviewed-effects/v1',
+  teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+  sourceIntegrationAppVersionSimplyId: config.integrationAppVersionSimplyId,
+  sourceIntegrationAppReleaseSimplyId: 'IARL-0001-AAAA',
+  sourceIntegrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+  targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+  targetIntegrationAppReleaseSimplyId: 'IARL-0002-AAAA',
+  expectedAuthorityRevision: 7,
+  roleSelectionHash: hash(currentRoleSelection().roleSelection),
+  sharedBlueprintSiblingTeamIntegrationSimplyIds: ['TINT-0002-BBBB'],
+  revokedGrantCount: 1,
+  reconsentRequiredProviderAccountLinkCount: 2,
+  externalBlueprintConsent: {
+    projection: blueprint.consentProjection,
+    consentFingerprint: blueprint.consentFingerprint,
+  },
+  ...overrides,
+});
+
+const applyVersionUpgradeAction = (blueprint, overrides = {}) => {
+  const expectedReviewedEffects = reviewedEffects(blueprint);
+  return {
+    action: 'apply-installation-version-upgrade',
+    targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    sourceIntegrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+    expectedAuthorityRevision: 7,
+    decisions: { 'new-managed-collection': { action: 'APPLY' } },
+    expectedReviewedEffects,
+    expectedReviewedEffectsHash: hash(expectedReviewedEffects),
+    idempotencyKey: 'installation-upgrade-0001',
+    ...overrides,
+  };
+};
+
+const installationVersionPreview = (blueprint, overrides = {}) => ({
+  consentPreviewSimplyId: 'ICPV-0001-AAAA',
+  teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+  integrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+  sourceIntegrationAppVersionSimplyId: config.integrationAppVersionSimplyId,
+  sourceIntegrationAppReleaseSimplyId: 'IARL-0001-AAAA',
+  sourceIntegrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+  targetIntegrationAppReleaseSimplyId: 'IARL-0002-AAAA',
+  roleSelection: currentRoleSelection().roleSelection,
+  externalBlueprint: {
+    projection: blueprint.consentProjection,
+    consentFingerprint: blueprint.consentFingerprint,
+  },
+  signedConsent: {
+    consent: {
+      teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+      integrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+      externalBlueprint: blueprint.consentProjection,
+      externalBlueprintConsentFingerprint: blueprint.consentFingerprint,
+    },
+    signature: 'signature-not-projected',
+  },
+  consentFingerprint: `consent.v1.${'8'.repeat(64)}`,
+  csrfState: 'csrf-kept-in-memory-only',
+  expiresAt: '2026-09-06T20:00:00.000Z',
+  sharedBlueprintSiblingTeamIntegrationSimplyIds: ['TINT-0002-BBBB'],
+  revokedGrantCount: 1,
+  reconsentRequiredProviderAccountLinkCount: 2,
+  ...overrides,
+});
+
+const installationVersionCommit = (overrides = {}) => ({
+  outcome: 'PENDING_SETUP',
+  status: 'PENDING_SETUP',
+  teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+  sourceIntegrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+  targetIntegrationInstallationEpochSimplyId: 'IIEP-0002-AAAA',
+  integrationInstallationConsentSimplyId: 'IICO-0002-AAAA',
+  integrationInstallationOperationSimplyId: 'IIOP-0002-AAAA',
+  authorityRevision: 8,
+  revokedGrantCount: 1,
+  reconsentRequiredProviderAccountLinkCount: 2,
+  materializationEffect: 'ENQUEUED',
+  ...overrides,
+});
+
+const installationVersionReadback = (overrides = {}) => ({
+  integration: {
+    teamIntegrationSimplyId: config.teamIntegrationSimplyId,
+    integrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    installationStatus: 'PENDING_SETUP',
+    ...overrides,
+  },
+});
+
+const installationVersionCommitPacket = (blueprint, payloadOverrides = {}) => {
+  const effects = reviewedEffects(blueprint);
+  const payload = {
+    teamSimplyId: config.teamSimplyId,
+    reviewedEffects: effects,
+    reviewedEffectsHash: hash(effects),
+    consentPreviewSimplyId: 'ICPV-0001-AAAA',
+    previewConsentFingerprint: `consent.v1.${'8'.repeat(64)}`,
+    previewExpiresAt: '2026-09-06T20:00:00.000Z',
+    csrfState: 'csrf-kept-in-memory-only',
+    idempotencyKey: 'installation-upgrade-0001',
+    ...payloadOverrides,
+  };
+  return {
+    schemaVersion: 'simply360.hello-installation-version-upgrade-commit-packet/v1',
+    payload,
+    packetHash: hash(payload),
+  };
+};
+
 const managedProvenance = (blueprintEntityType, blueprintRef) => ({
   blueprintEntityType, blueprintRef, ownershipDisposition: 'BLUEPRINT_MANAGED',
   teamBlueprintSimplyId: 'TBPR-0001-AAAA', blueprintDefinitionSimplyId: 'BPDF-0001-AAAA',
@@ -429,6 +580,11 @@ test('refuses missing upgrade choices and wrong operation or target before dispa
     lifecyclePreview('INSTALL', 'IAVR-0002-AAAA'),
     lifecyclePreview('UPGRADE', 'IAVR-9999-ZZZZ'),
     lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]),
+    lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [{
+      ...change,
+      allowedDecisions: ['MAP_EXISTING'],
+      mappedEntitySimplyId: 'DCOL-0002-AAAA',
+    }]),
   ]);
   const instances = await clients();
   const action = { action: 'upgrade-blueprint', targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
@@ -438,9 +594,273 @@ test('refuses missing upgrade choices and wrong operation or target before dispa
   await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action }), /does not match/u);
   await assert.rejects(runHelloAcceptanceAction({ config, clients: instances,
     action: { ...action, decisions: { unrelated: { action: 'APPLY' } } } }), /outside the current preview/u);
-  assert.equal(calls.length, 4);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances,
+    action: { ...action, decisions: { 'required-change': { action: 'MAP_EXISTING', mappedEntitySimplyId: 'DCOL-9999-ZZZZ' } } } }),
+  /exact public candidate/u);
+  assert.equal(calls.length, 5);
   assert.ok(calls.every((call) => call.url.endsWith('/preview')));
   assert.throws(() => HelloAcceptanceActionSchema.parse({ ...action, decisions: { destructive: { action: 'DELETE' } } }));
+});
+
+test('previews one exact installation version using its persisted role and fresh combined Blueprint consent', async (context) => {
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [
+    { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true },
+  ]);
+  const preview = installationVersionPreview(blueprint);
+  const calls = captureResponses(context, [currentRoleSelection(), blueprint, preview]);
+  const result = await runHelloAcceptanceAction({
+    config,
+    clients: await clients(),
+    action: {
+      action: 'preview-installation-version-upgrade',
+      targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+      sourceIntegrationInstallationEpochSimplyId: 'IIEP-0001-AAAA',
+      expectedAuthorityRevision: 7,
+      decisions: { 'new-managed-collection': { action: 'APPLY' } },
+    },
+  });
+
+  assert.equal(result.outcome, 'INSTALLATION_VERSION_UPGRADE_PREVIEWED');
+  assert.deepEqual(result.sharedBlueprintSiblingTeamIntegrationSimplyIds, ['TINT-0002-BBBB']);
+  assert.deepEqual(result.reviewedEffects, reviewedEffects(blueprint));
+  assert.equal(result.reviewedEffectsHash, hash(result.reviewedEffects));
+  assert.doesNotMatch(JSON.stringify(result), /csrf|signature/iu);
+  assert.equal(Object.hasOwn(result, 'roleSelection'), false);
+  assert.equal(calls.length, 3);
+  assert.match(calls[0].url, /consent-role-selection$/u);
+  assert.match(calls[1].url, /external-blueprints\/upgrade\/preview$/u);
+  assert.match(calls[2].url, /version-upgrade-preview$/u);
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    decisionsByPackageKey: { 'hello-records': { 'new-managed-collection': { action: 'APPLY' } } },
+  });
+  assert.deepEqual(JSON.parse(calls[2].init.body), {
+    targetIntegrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    roleSelection: currentRoleSelection().roleSelection,
+    externalBlueprintConsent: {
+      projection: blueprint.consentProjection,
+      consentFingerprint: blueprint.consentFingerprint,
+    },
+  });
+});
+
+test('applies only its fresh preview with one fixed header key and keeps CSRF in memory', async (context) => {
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [
+    { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true },
+  ]);
+  const preview = installationVersionPreview(blueprint);
+  const calls = captureResponses(context, [
+    currentRoleSelection(), blueprint, preview, installationVersionCommit(), installationVersionReadback(),
+  ]);
+  const saved = [];
+  const result = await runHelloAcceptanceAction({
+    config,
+    clients: await clients(),
+    action: applyVersionUpgradeAction(blueprint),
+    installationVersionUpgradePacketStore: { save: async (packet) => { saved.push(packet); } },
+  });
+
+  assert.equal(result.outcome, 'PENDING_SETUP');
+  assert.equal(result.integrationInstallationOperationSimplyId, 'IIOP-0002-AAAA');
+  assert.doesNotMatch(JSON.stringify(result), /csrf|signature|roleSelection/iu);
+  assert.equal(calls.length, 5);
+  assert.match(calls[3].url, /version-upgrade-commit$/u);
+  assert.match(calls[4].url, /team-integrations\/TINT-0001-AAAA$/u);
+  assert.equal(calls[3].init.headers['Idempotency-Key'], 'installation-upgrade-0001');
+  assert.deepEqual(JSON.parse(calls[3].init.body), {
+    consentPreviewSimplyId: 'ICPV-0001-AAAA',
+    csrfState: 'csrf-kept-in-memory-only',
+  });
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].packetHash, result.recoveryPacketHash);
+  assert.equal(saved[0].payload.reviewedEffectsHash, result.reviewedEffectsHash);
+  assert.equal(result.readbackInstallationStatus, 'PENDING_SETUP');
+  assert.doesNotMatch(JSON.stringify(result), /idempotency|csrf/iu);
+});
+
+test('refuses changed sibling and revocation effects after human review before commit', async (context) => {
+  const change = { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true };
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]);
+  const action = applyVersionUpgradeAction(blueprint);
+  const calls = captureResponses(context, [
+    currentRoleSelection(), blueprint, installationVersionPreview(blueprint, {
+      sharedBlueprintSiblingTeamIntegrationSimplyIds: ['TINT-0003-CCCC'],
+    }),
+    currentRoleSelection(), blueprint, installationVersionPreview(blueprint, {
+      revokedGrantCount: 2,
+    }),
+    currentRoleSelection(), blueprint, installationVersionPreview(blueprint, {
+      reconsentRequiredProviderAccountLinkCount: 3,
+    }),
+  ]);
+  const store = { save: async () => assert.fail('drift must be rejected before packet persistence') };
+
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: await clients(), action,
+    installationVersionUpgradePacketStore: store }), /differ from the explicitly reviewed preview/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: await clients(), action,
+    installationVersionUpgradePacketStore: store }), /differ from the explicitly reviewed preview/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: await clients(), action,
+    installationVersionUpgradePacketStore: store }), /differ from the explicitly reviewed preview/u);
+  assert.equal(calls.length, 9);
+  assert.ok(calls.every(({ url }) => !url.endsWith('/version-upgrade-commit')));
+});
+
+test('retains the exact pre-dispatch packet after lost success and replays without creating new previews', async (context) => {
+  const change = { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true };
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]);
+  const action = applyVersionUpgradeAction(blueprint);
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const initialResponses = [currentRoleSelection(), blueprint, installationVersionPreview(blueprint)];
+  const initialCalls = [];
+  globalThis.fetch = async (url, init) => {
+    initialCalls.push({ url: String(url), init });
+    if (initialResponses.length > 0) return response(initialResponses.shift());
+    throw new Error('simulated lost success response');
+  };
+  const saved = [];
+  await assert.rejects(runHelloAcceptanceAction({
+    config,
+    clients: await clients(),
+    action,
+    installationVersionUpgradePacketStore: { save: async (packet) => { saved.push(packet); } },
+  }), /lost success/u);
+  assert.equal(saved.length, 1);
+  assert.equal(initialCalls.length, 4);
+  assert.equal(HelloInstallationVersionUpgradeCommitPacketSchema.safeParse(saved[0]).success, true);
+
+  const replayCalls = [];
+  const replayResponses = [installationVersionCommit({ outcome: 'ALREADY_APPLIED' }),
+    installationVersionReadback({ installationStatus: 'ACTIVE' })];
+  globalThis.fetch = async (url, init) => {
+    replayCalls.push({ url: String(url), init });
+    return response(replayResponses.shift());
+  };
+  const result = await runHelloAcceptanceAction({
+    config,
+    clients: await clients(),
+    action: { action: 'replay-installation-version-upgrade-commit', packet: saved[0] },
+  });
+  assert.equal(result.outcome, 'ALREADY_APPLIED');
+  assert.equal(result.readbackInstallationStatus, 'ACTIVE');
+  assert.equal(replayCalls.length, 2);
+  assert.match(replayCalls[0].url, /version-upgrade-commit$/u);
+  assert.match(replayCalls[1].url, /team-integrations\/TINT-0001-AAAA$/u);
+  assert.ok(replayCalls.every(({ url }) => !url.includes('preview')));
+  assert.equal(replayCalls[0].init.headers['Idempotency-Key'], action.idempotencyKey);
+});
+
+test('rejects tampered recovery packets and invalid commit/readback evidence', async (context) => {
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [
+    { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true },
+  ]);
+  const packet = installationVersionCommitPacket(blueprint);
+  const tampered = structuredClone(packet);
+  tampered.payload.idempotencyKey = 'installation-upgrade-tampered';
+  assert.equal(HelloInstallationVersionUpgradeCommitPacketSchema.safeParse(tampered).success, false);
+
+  const calls = captureResponses(context, [
+    installationVersionCommit({ revokedGrantCount: 9 }),
+    installationVersionCommit({ reconsentRequiredProviderAccountLinkCount: 9 }),
+    { ...installationVersionCommit(), integrationInstallationConsentSimplyId: 'invalid' },
+    installationVersionCommit(), installationVersionReadback({ integrationAppVersionSimplyId: 'IAVR-9999-ZZZZ' }),
+  ]);
+  const replay = (selected = packet) => runHelloAcceptanceAction({
+    config,
+    clients: createHelloAcceptanceClients(config, {
+      installationService: 'installation-service-token-for-test',
+      teamAdmin: 'team-admin-token-for-test',
+    }),
+    action: { action: 'replay-installation-version-upgrade-commit', packet: selected },
+  });
+  await assert.rejects(replay(), /explicitly reviewed effects/u);
+  await assert.rejects(replay(), /explicitly reviewed effects/u);
+  await assert.rejects(replay(), /expected string to match pattern|Invalid string/iu);
+  await assert.rejects(replay(), /does not prove the reviewed target version/u);
+  await assert.rejects(replay(tampered), /Recovery packet hash/u);
+  assert.equal(calls.length, 5);
+});
+
+test('persists one exact private recovery packet and refuses overwrite, loose mode, and tampering', async (context) => {
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA');
+  const packet = installationVersionCommitPacket(blueprint);
+  const path = join(tmpdir(), `hello-upgrade-recovery-${process.pid}-${Date.now()}.json`);
+  context.after(() => { try { unlinkSync(path); } catch {} });
+  const store = createHelloInstallationVersionUpgradePacketFileStore(path);
+  await store.save(packet);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual(await readHelloInstallationVersionUpgradeCommitPacket(path), packet);
+  await assert.rejects(store.save(packet), /exist/iu);
+
+  chmodSync(path, 0o644);
+  await assert.rejects(readHelloInstallationVersionUpgradeCommitPacket(path), /0600/u);
+  chmodSync(path, 0o600);
+  const tampered = structuredClone(packet);
+  tampered.payload.csrfState = 'tampered-csrf-state-value';
+  writeFileSync(path, JSON.stringify(tampered), { mode: 0o600 });
+  await assert.rejects(readHelloInstallationVersionUpgradeCommitPacket(path), /Recovery packet hash/u);
+});
+
+test('refuses stale source authority, changed role, wrong target, and Team denial without mutation retry', async (context) => {
+  const change = { changeId: 'new-managed-collection', allowedDecisions: ['APPLY'], requiresDecision: true };
+  const blueprint = lifecyclePreview('UPGRADE', 'IAVR-0002-AAAA', [change]);
+  const action = applyVersionUpgradeAction(blueprint, { idempotencyKey: 'installation-upgrade-0002' });
+  const calls = captureResponses(context, [
+    currentRoleSelection({ authorityRevision: 8 }),
+    currentRoleSelection(), blueprint, installationVersionPreview(blueprint, {
+      roleSelection: { ...currentRoleSelection().roleSelection, features: [{ featurePermissionKey: 'UNREVIEWED', hasEditPermission: true }] },
+    }),
+    currentRoleSelection(), lifecyclePreview('UPGRADE', 'IAVR-9999-ZZZZ', [change]),
+  ]);
+  const instances = await clients();
+  const store = { save: async () => assert.fail('must not save before preview validation') };
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action,
+    installationVersionUpgradePacketStore: store }), /source coordinates/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action,
+    installationVersionUpgradePacketStore: store }), /reviewed installation authority/u);
+  await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action,
+    installationVersionUpgradePacketStore: store }), /selected app version and package/u);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every(({ url }) => !url.endsWith('/version-upgrade-commit')));
+
+  const originalFetch = globalThis.fetch;
+  let deniedCalls = 0;
+  globalThis.fetch = async () => {
+    deniedCalls += 1;
+    return ({
+    ok: false,
+    status: 403,
+    text: async () => JSON.stringify({ error: 'Team authority denied', code: 'TEAM_ACCESS_DENIED' }),
+    headers: { forEach: () => {} },
+    });
+  };
+  try {
+    await assert.rejects(runHelloAcceptanceAction({ config, clients: instances, action,
+      installationVersionUpgradePacketStore: store }), /Team authority denied/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(deniedCalls, 1);
+});
+
+test('CLI requires an explicit apply flag before installation-version mutation setup', () => {
+  const configPath = join(tmpdir(), `hello-consent-config-${process.pid}.json`);
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  const result = spawnSync(process.execPath, [
+    'scripts/run-hello-acceptance.mjs',
+    'apply-installation-version-upgrade',
+    '--config', configPath,
+    '--source-epoch-simply-id', 'IIEP-0001-AAAA',
+    '--expected-authority-revision', '7',
+    '--target-app-version-simply-id', 'IAVR-0002-AAAA',
+    '--decisions-path', '/private/not-read-without-apply.json',
+    '--idempotency-key', 'installation-upgrade-0003',
+  ], { cwd: process.cwd(), encoding: 'utf8' });
+  unlinkSync(configPath);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /requires --apply/u);
+  assert.doesNotMatch(result.stderr, /token|credential/iu);
 });
 
 test('introduces reversible managed-field drift using only exact public provenance and confirms it', async (context) => {

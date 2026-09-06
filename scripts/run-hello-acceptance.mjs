@@ -5,9 +5,12 @@ import { z } from 'zod';
 import {
   HelloAcceptanceActionSchema,
   HelloAcceptanceConfigSchema,
+  HelloInstallationVersionUpgradeReviewedEffectsSchema,
   bindHelloAcceptanceUserCredential,
+  createHelloInstallationVersionUpgradePacketFileStore,
   createHelloAcceptanceClients,
   createHelloStateStore,
+  readHelloInstallationVersionUpgradeCommitPacket,
   runHelloAcceptanceAction,
 } from '../dist/index.js';
 
@@ -29,6 +32,8 @@ const MUTATING_ACTIONS = new Set([
   'install-blueprint',
   'uninstall-blueprint',
   'upgrade-blueprint',
+  'apply-installation-version-upgrade',
+  'replay-installation-version-upgrade-commit',
   'introduce-blueprint-drift',
   'reconcile-blueprint',
 ]);
@@ -57,10 +62,24 @@ const required = (flags, name) => {
   return value;
 };
 
+const requiredPositiveInteger = (flags, name) => {
+  const value = required(flags, name);
+  if (!/^[1-9][0-9]*$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new Error(`Flag ${name} must be a positive integer`);
+  }
+  return Number(value);
+};
+
 const requiredEnvironment = (name) => {
   const value = process.env[name];
   if (!value || value.trim() !== value) throw new Error(`Missing required environment setting: ${name}`);
   return value;
+};
+
+const readBoundedJson = async (path, label) => {
+  const bytes = await readFile(path);
+  if (bytes.length > 64 * 1024) throw new Error(`${label} exceeds 64 KiB`);
+  return JSON.parse(bytes.toString('utf8'));
 };
 
 const assertOnly = (flags, names) => {
@@ -133,6 +152,40 @@ const actionFromFlags = async (name, flags) => {
         ...(mutating ? { idempotencyKey: required(flags, '--idempotency-key') } : {}),
       };
     }
+    case 'preview-installation-version-upgrade':
+    case 'apply-installation-version-upgrade': {
+      const mutating = name === 'apply-installation-version-upgrade';
+      assertOnly(flags, [
+        ...shared,
+        '--target-app-version-simply-id',
+        '--source-epoch-simply-id',
+        '--expected-authority-revision',
+        '--decisions-path',
+        ...(mutating ? ['--idempotency-key', '--reviewed-effects-path', '--recovery-packet-path'] : []),
+      ]);
+      const decisions = await readBoundedJson(required(flags, '--decisions-path'), 'Upgrade decisions');
+      const reviewed = mutating
+        ? await readBoundedJson(required(flags, '--reviewed-effects-path'), 'Reviewed effects')
+        : undefined;
+      return {
+        action: name,
+        targetIntegrationAppVersionSimplyId: required(flags, '--target-app-version-simply-id'),
+        sourceIntegrationInstallationEpochSimplyId: required(flags, '--source-epoch-simply-id'),
+        expectedAuthorityRevision: requiredPositiveInteger(flags, '--expected-authority-revision'),
+        decisions,
+        ...(mutating ? {
+          expectedReviewedEffects: HelloInstallationVersionUpgradeReviewedEffectsSchema.parse(reviewed?.reviewedEffects),
+          expectedReviewedEffectsHash: reviewed?.reviewedEffectsHash,
+          idempotencyKey: required(flags, '--idempotency-key'),
+        } : {}),
+      };
+    }
+    case 'replay-installation-version-upgrade-commit':
+      assertOnly(flags, ['--config', '--apply', '--recovery-packet-path']);
+      return {
+        action: name,
+        packet: await readHelloInstallationVersionUpgradeCommitPacket(required(flags, '--recovery-packet-path')),
+      };
     case 'background-task-status':
       assertOnly(flags, ['--config', '--background-task-simply-id']);
       return { action: name, backgroundTaskSimplyId: required(flags, '--background-task-simply-id') };
@@ -184,6 +237,10 @@ const main = async () => {
     config,
     action,
     clients,
+    ...(action.action === 'apply-installation-version-upgrade'
+      ? { installationVersionUpgradePacketStore:
+          createHelloInstallationVersionUpgradePacketFileStore(required(flags, '--recovery-packet-path')) }
+      : {}),
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 };
