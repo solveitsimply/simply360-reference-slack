@@ -27,6 +27,24 @@ local tests are ready. Private app coordinates, immutable artifact upload,
 reviewed dev deployment, and live lifecycle evidence remain pending and must
 be bound to one immutable accepted candidate.
 
+The reviewed baseline remains `1.0.9` at source
+`3848891be5a4a2810353765675a3d2cb9e136546`; the asset builder refuses to
+relabel that definition under another source. The separately reviewed `1.0.10`
+definition preserves the TEAM-owned `hello-records` Collection and adds only
+the INTEGRATION-owned `hello-integration-notes` Collection with its one `note`
+field. Both Collections use `PRESERVE` on unlink. The successor alone declares
+`app.upgrade.completed` so the signed receiver can retain delivery evidence for
+the completed target epoch. Generate either version only from its clean exact
+checkout:
+
+```bash
+npm run assets:hello -- "$(git rev-parse HEAD)" 1.0.9
+npm run assets:hello -- "$(git rev-parse HEAD)" 1.0.10
+```
+
+Only the command matching that checkout's reviewed version succeeds; unknown
+definition versions fail closed.
+
 `config/hello-acceptance.template.json` deliberately contains invalid
 `REQUIRED_*` placeholders. Copy it outside source control, fill it only from
 the reviewed registration and Blueprint-install receipts, and check it with:
@@ -47,14 +65,53 @@ client, and grant authority from the bearer token. Only the Team Admin
 Blueprint/list/revoke calls send the public Team Simply ID header.
 
 The available read-only commands are `read-records`, `list-provider-links`,
-`preview-blueprint-install`, `preview-blueprint-uninstall`, and
-`background-task-status`. `user-write-record`, `service-write-record`,
-`attest-provider-link`,
-`revoke-provider-link`, `install-blueprint`, and `uninstall-blueprint` require
-an explicit `--apply`; every retryable mutation also requires its public
-idempotency key. Install and uninstall use the consent fingerprint and
-projection returned by the immediately preceding public preview in the same
-process.
+`preview-blueprint-install`, `preview-blueprint-uninstall`,
+`preview-blueprint-upgrade`, `inspect-blueprint-drift`,
+`preview-blueprint-reconcile`, and `background-task-status`.
+`user-write-record`, `service-write-record`, `attest-provider-link`,
+`revoke-provider-link`, `install-blueprint`, `upgrade-blueprint`,
+`introduce-blueprint-drift`, `reconcile-blueprint`, and `uninstall-blueprint`
+require an explicit `--apply`; every retryable mutation also requires its
+public idempotency key. Install, upgrade, reconcile, and uninstall execute only
+the consent fingerprint and projection returned by their immediately preceding
+public preview in the same process.
+
+The Blueprint-upgrade commands consume a private JSON object whose keys are
+the exact decision-required change IDs returned by the current preview and
+whose values are only `{ "action": "APPLY" }` or an offered
+`MAP_EXISTING` decision with its public Simply ID. Start with an empty object
+to discover the current changes, review and replace it with the exact offered
+decisions, then run the mutation:
+
+```bash
+npm run acceptance:hello -- preview-blueprint-upgrade --config "$HELLO_CONFIG" \
+  --target-app-version-simply-id "$TARGET_INTEGRATION_APP_VERSION_SIMPLY_ID" \
+  --decisions-path "$HELLO_UPGRADE_DECISIONS"
+npm run acceptance:hello -- upgrade-blueprint --config "$HELLO_CONFIG" \
+  --target-app-version-simply-id "$TARGET_INTEGRATION_APP_VERSION_SIMPLY_ID" \
+  --decisions-path "$HELLO_UPGRADE_DECISIONS" \
+  --idempotency-key "$HELLO_BLUEPRINT_UPGRADE_IDEMPOTENCY_KEY" --apply
+npm run acceptance:hello -- background-task-status --config "$HELLO_CONFIG" \
+  --background-task-simply-id "$BACKGROUND_TASK_SIMPLY_ID"
+npm run acceptance:hello -- inspect-blueprint-drift --config "$HELLO_CONFIG"
+npm run acceptance:hello -- introduce-blueprint-drift --config "$HELLO_CONFIG" --apply
+npm run acceptance:hello -- preview-blueprint-reconcile --config "$HELLO_CONFIG"
+npm run acceptance:hello -- reconcile-blueprint --config "$HELLO_CONFIG" --apply
+```
+
+These commands do not replace installation-version consent. Before the
+Blueprint upgrade, publish and complete REVIEW/FINAL for the exact `1.0.10`
+manifest and package, then use the protected Public API with a recently
+authenticated Team Admin to preview and commit the target installation version
+for each shared sibling. After each package link reaches the target version,
+the platform finalizer must revalidate every shared target package link, resume
+the exact upgrade operation, activate the target epoch, and issue its service
+grant. Update the hosted runtime's exact version, release, client, and
+webhook-key bindings from those reviewed public receipts before beginning fresh
+target-version user OAuth; only then renew the affected external account links.
+Fresh OAuth does not activate the installation epoch. The current vendored
+platform SDK predates those installation-version methods; repack it from the
+immutable upgraded platform candidate before attempting these steps.
 
 ## Legacy full-provider status
 

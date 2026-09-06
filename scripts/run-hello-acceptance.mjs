@@ -28,6 +28,9 @@ const MUTATING_ACTIONS = new Set([
   'revoke-provider-link',
   'install-blueprint',
   'uninstall-blueprint',
+  'upgrade-blueprint',
+  'introduce-blueprint-drift',
+  'reconcile-blueprint',
 ]);
 
 const parseFlags = (values) => {
@@ -67,12 +70,16 @@ const assertOnly = (flags, names) => {
   }
 };
 
-const actionFromFlags = (name, flags) => {
+const actionFromFlags = async (name, flags) => {
   const shared = ['--config', ...(MUTATING_ACTIONS.has(name) ? ['--apply'] : [])];
   switch (name) {
     case 'read-records':
     case 'preview-blueprint-install':
     case 'preview-blueprint-uninstall':
+    case 'inspect-blueprint-drift':
+    case 'introduce-blueprint-drift':
+    case 'preview-blueprint-reconcile':
+    case 'reconcile-blueprint':
       assertOnly(flags, shared);
       return { action: name };
     case 'user-write-record':
@@ -113,6 +120,19 @@ const actionFromFlags = (name, flags) => {
     case 'uninstall-blueprint':
       assertOnly(flags, shared);
       return { action: name };
+    case 'preview-blueprint-upgrade':
+    case 'upgrade-blueprint': {
+      const mutating = name === 'upgrade-blueprint';
+      assertOnly(flags, [...shared, '--target-app-version-simply-id', '--decisions-path', ...(mutating ? ['--idempotency-key'] : [])]);
+      const bytes = await readFile(required(flags, '--decisions-path'));
+      if (bytes.length > 64 * 1024) throw new Error('Upgrade decisions exceed 64 KiB');
+      return {
+        action: name,
+        targetIntegrationAppVersionSimplyId: required(flags, '--target-app-version-simply-id'),
+        decisions: JSON.parse(bytes.toString('utf8')),
+        ...(mutating ? { idempotencyKey: required(flags, '--idempotency-key') } : {}),
+      };
+    }
     case 'background-task-status':
       assertOnly(flags, ['--config', '--background-task-simply-id']);
       return { action: name, backgroundTaskSimplyId: required(flags, '--background-task-simply-id') };
@@ -147,7 +167,7 @@ const main = async () => {
   if (MUTATING_ACTIONS.has(actionName) && flags.get('--apply') !== true) {
     throw new Error(`Action ${actionName} requires --apply`);
   }
-  const action = HelloAcceptanceActionSchema.parse(actionFromFlags(actionName, flags));
+  const action = HelloAcceptanceActionSchema.parse(await actionFromFlags(actionName, flags));
   const tokens = {
     installationService: process.env[TOKEN_ENV.installationService] ?? '',
     teamAdmin: process.env[TOKEN_ENV.teamAdmin] ?? '',
