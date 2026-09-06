@@ -6,16 +6,21 @@ doubles, generated assets, CI, and intended infrastructure boundary.
 
 ## Trust boundaries
 
-1. Simply360 → reference runtime: hostile network and body; webhook-v2 HMAC is
+1. Browser → reference runtime → Simply360: the pending OAuth intent is
+   anonymous, encrypted, bound to a high-entropy browser nonce, expires within
+   10 minutes, and is atomically consumed. Simply360 hosted consent alone
+   chooses the installation; returned public identity coordinates establish
+   the exact encrypted credential namespace.
+2. Simply360 → reference runtime: hostile network and body; webhook-v2 HMAC is
    required over raw bytes.
-2. Slack → reference runtime: hostile network and form body; Slack v0 HMAC is
+3. Slack → reference runtime: hostile network and form body; Slack v0 HMAC is
    required over raw bytes.
-3. Reference runtime → Slack: OAuth bot token with `chat:write` and
+4. Reference runtime → Slack: OAuth bot token with `chat:write` and
    `commands`; the latter is required solely for the reviewed message shortcut.
-4. Reference runtime → local Simply360 trigger outbox: exact,
+5. Reference runtime → local Simply360 trigger outbox: exact,
    request-fingerprinted local proof only; hosted signed ingress remains
    blocked until the public contract exists.
-5. Publisher artifacts → Simply360: generated from an exact source SHA with
+6. Publisher artifacts → Simply360: generated from an exact source SHA with
    content hashes and no secrets.
 
 ## Reviewed abuse cases
@@ -28,7 +33,10 @@ doubles, generated assets, CI, and intended infrastructure boundary.
 | Cross-installation access | Every occurrence and local OAuth family binds one exact installation; Slack shortcuts must match the installation's exact configured workspace; sibling read/write/link/revoke and cross-workspace rejection tests pass. |
 | Pending grant privilege | Setup/status only; ordinary read/write is denied until activation and a later refresh. |
 | OAuth code interception | Exact client, redirect, installation, consent revision, single-use code, and S256 PKCE. |
+| Installation injection before consent | The external client persists no Team, member, installation, or grant coordinate before redirect. Simply360's hosted consent chooses the installation, and the callback accepts only the exact public token binding for the reviewed client, app/version/release, canonical audience/resource, environment, and scope set. |
+| Cross-browser callback or state replay | A separate anonymous pending-intent namespace stores encrypted PKCE and browser nonce for at most 10 minutes; conditional delete checks expiry and the nonce digest, and consumes once. |
 | Refresh replay | Reuse of a spent refresh token revokes the whole family; subsequent access fails. |
+| Ambiguous refresh result | Credential custody is conditionally fenced as `REFRESH_IN_PROGRESS` before dispatch. Any transport, response-validation, identity-drift, or final-write failure leaves the exact grant unavailable for automatic retry. |
 | Scope escalation | Any wider set requires explicit fresh consent; live consent revision fences old families. |
 | Slack over-collection | No history scopes or event subscriptions; only explicit message shortcut input is accepted. |
 | Expired Slack bot grant | Token rotation is enabled; access + one-time refresh tokens are parsed as a closed grant and rotated together. |
@@ -53,14 +61,19 @@ doubles, generated assets, CI, and intended infrastructure boundary.
   durable atomic idempotency service.
 - Local management/setup routes have no published public authentication
   contract. The executable entry point therefore refuses non-loopback hosts.
-- The public SDKs are unpublished. Local OAuth/webhook compatibility code must
-  be replaced and conformance-tested against the published packages.
+- The public SDKs are unpublished. The selected hello runtime, asset generator,
+  and acceptance driver consume exact reviewed packed artifacts; legacy
+  OAuth/webhook and full Slack behavior still require later published-package
+  conformance.
 - `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` lack public invocation/result
   schemas. The runnable action route and trigger outbox use explicit local
   harness shapes; they must not be exposed or represented as public wire
   conformance.
-- No hosted stack, IAM policy, Slack app, credential rotation, CloudWatch
-  evidence, penetration test, or deployed cleanup proof exists.
+- The exact five-route Lambda and least-privilege IAM source exist, but no AWS
+  runtime, credentials, key rotation, CloudWatch evidence, penetration test, or
+  deployed cleanup proof exists. The recorded synthetic Slack app shell has no
+  installed provider grant; that work is deferred from the selected
+  provider-neutral milestone.
 - Slack token rotation semantics and manifest acceptance must be verified in
   the real dedicated workspace.
 

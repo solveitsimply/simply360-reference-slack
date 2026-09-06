@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Dev-only public-origin and owner-managed-secret foundation for the Simply360
-  Slack reference proof. It deliberately creates no runtime integration until
-  the published Simply360 remote-action and remote-trigger contracts exist.
+  Dev-only private hello integration runtime for the Simply360 out-of-tree
+  acceptance proof.
 
 Parameters:
   PublicDomainName:
@@ -15,6 +14,55 @@ Parameters:
   HostedZoneId:
     Type: String
     AllowedPattern: '^Z[A-Z0-9]+$'
+  HelloRuntimeRoleArn:
+    Type: String
+    AllowedPattern: '^arn:aws:iam::592668326732:role/simply360-reference-slack-dev-runtime$'
+  RuntimeArtifactBucketName:
+    Type: String
+    AllowedPattern: '^simply360-reference-slack-dev-[a-z0-9-]+$'
+  RuntimeArtifactKey:
+    Type: String
+    AllowedPattern: '^simply360-reference-slack/[a-f0-9]{40}/hello-lambda\.zip$'
+  RuntimeArtifactObjectVersion:
+    Type: String
+    MinLength: 1
+    MaxLength: 1_024
+    AllowedPattern: '^[A-Za-z0-9._~+/=-]+$'
+  Simply360AuthorizationEndpoint:
+    Type: String
+    AllowedPattern: '^https://api\.dev\.simply360\.app/oauth/authorize$'
+  Simply360TokenEndpoint:
+    Type: String
+    AllowedPattern: '^https://api\.dev\.simply360\.app/oauth/token$'
+  Simply360ClientId:
+    Type: String
+    MinLength: 1
+    MaxLength: 512
+    NoEcho: true
+  IntegrationPublisherSimplyId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
+  IntegrationAppSimplyId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
+  IntegrationAppVersionSimplyId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
+  IntegrationAppReleaseSimplyId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
+  IntegrationAppOAuthClientSimplyId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
+  Simply360OAuthScopes:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9:_-]*(,[a-z][a-z0-9:_-]*)+$'
+  Simply360EventTypes:
+    Type: String
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9.]+(,[A-Za-z][A-Za-z0-9.]+)*$'
+  Simply360LifecycleEventTypes:
+    Type: String
+    AllowedPattern: '^app\.[A-Za-z][A-Za-z0-9.]+(,app\.[A-Za-z][A-Za-z0-9.]+)*$'
 
 Resources:
   RuntimeSecret:
@@ -22,8 +70,39 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      TableName: simply360-reference-slack-dev-hello-state
       Name: s360/reference-slack/dev/runtime
-      Description: Slack and Simply360 reference-dev credentials; owner-managed after stack creation.
+      Description: Private hello runtime encryption and Simply360 webhook keys; owner-managed after stack creation.
+      Tags:
+        - Key: simply360:reference-repository
+          Value: simply360-reference-slack
+        - Key: simply360:environment
+          Value: dev
+
+  HelloStateTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      TimeToLiveSpecification:
+        AttributeName: expiresAtEpoch
+        Enabled: true
       Tags:
         - Key: simply360:reference-repository
           Value: simply360-reference-slack
@@ -86,23 +165,131 @@ Resources:
         DNSName: !GetAtt ApiDomain.RegionalDomainName
         HostedZoneId: !GetAtt ApiDomain.RegionalHostedZoneId
 
+  HelloRuntimeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/simply360-reference-slack-dev-hello
+      RetentionInDays: 7
+
+  HelloRuntimeFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: HelloRuntimeLogGroup
+    Properties:
+      FunctionName: simply360-reference-slack-dev-hello
+      Description: Public-contract-only private hello integration runtime.
+      Architectures: [arm64]
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !Ref HelloRuntimeRoleArn
+      MemorySize: 256
+      Timeout: 15
+      ReservedConcurrentExecutions: 2
+      Code:
+        S3Bucket: !Ref RuntimeArtifactBucketName
+        S3Key: !Ref RuntimeArtifactKey
+        S3ObjectVersion: !Ref RuntimeArtifactObjectVersion
+      Environment:
+        Variables:
+          HELLO_STATE_TABLE_NAME: !Ref HelloStateTable
+          HELLO_RUNTIME_SECRET_ID: !Ref RuntimeSecret
+          S360_AUTHORIZATION_ENDPOINT: !Ref Simply360AuthorizationEndpoint
+          S360_TOKEN_ENDPOINT: !Ref Simply360TokenEndpoint
+          S360_CLIENT_ID: !Ref Simply360ClientId
+          S360_REDIRECT_URI: !Sub https://${PublicDomainName}/oauth/simply360/callback
+          S360_INTEGRATION_PUBLISHER_SIMPLY_ID: !Ref IntegrationPublisherSimplyId
+          S360_INTEGRATION_APP_SIMPLY_ID: !Ref IntegrationAppSimplyId
+          S360_INTEGRATION_APP_VERSION_SIMPLY_ID: !Ref IntegrationAppVersionSimplyId
+          S360_INTEGRATION_APP_RELEASE_SIMPLY_ID: !Ref IntegrationAppReleaseSimplyId
+          S360_INTEGRATION_APP_OAUTH_CLIENT_SIMPLY_ID: !Ref IntegrationAppOAuthClientSimplyId
+          S360_OAUTH_SCOPES: !Ref Simply360OAuthScopes
+          S360_EVENT_TYPES: !Ref Simply360EventTypes
+          S360_LIFECYCLE_EVENT_TYPES: !Ref Simply360LifecycleEventTypes
+      Tags:
+        - Key: simply360:reference-repository
+          Value: simply360-reference-slack
+        - Key: simply360:environment
+          Value: dev
+
+  HelloRuntimeIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt HelloRuntimeFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 15000
+
+  HealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: {ApiId: !Ref HttpApi, RouteKey: 'GET /healthz', Target: !Sub 'integrations/${HelloRuntimeIntegration}'}
+  Simply360OAuthStartRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: {ApiId: !Ref HttpApi, RouteKey: 'GET /oauth/simply360/start', Target: !Sub 'integrations/${HelloRuntimeIntegration}'}
+  Simply360OAuthCallbackRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: {ApiId: !Ref HttpApi, RouteKey: 'GET /oauth/simply360/callback', Target: !Sub 'integrations/${HelloRuntimeIntegration}'}
+  Simply360EventsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: {ApiId: !Ref HttpApi, RouteKey: 'POST /events/simply360', Target: !Sub 'integrations/${HelloRuntimeIntegration}'}
+  Simply360LifecycleRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties: {ApiId: !Ref HttpApi, RouteKey: 'POST /lifecycle', Target: !Sub 'integrations/${HelloRuntimeIntegration}'}
+
+  HealthInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloRuntimeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/GET/healthz
+  Simply360OAuthStartInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloRuntimeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/GET/oauth/simply360/start
+  Simply360OAuthCallbackInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloRuntimeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/GET/oauth/simply360/callback
+  Simply360EventsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloRuntimeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/events/simply360
+  Simply360LifecycleInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloRuntimeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/lifecycle
+
 Outputs:
   ApiOrigin:
     Value: !Sub https://${PublicDomainName}
   RuntimeSecretArn:
-    Description: Owner writes reviewed Slack and Simply360 values directly here after stack creation.
+    Description: Owner writes reviewed hello encryption and webhook keys directly here after stack creation.
     Value: !Ref RuntimeSecret
-  SlackOAuthRedirectUri:
-    Value: !Sub https://${PublicDomainName}/oauth/slack/callback
-  SlackInteractivityRequestUrl:
-    Value: !Sub https://${PublicDomainName}/events/slack
+  HelloStateTableName:
+    Description: Durable installation, member-grant, OAuth-state, and idempotency storage.
+    Value: !Ref HelloStateTable
+  HelloStateTableArn:
+    Description: ARN for the future runtime's namespace-scoped DynamoDB policy.
+    Value: !GetAtt HelloStateTable.Arn
   Simply360OAuthRedirectUri:
     Value: !Sub https://${PublicDomainName}/oauth/simply360/callback
   Simply360EventDestinationUrl:
     Value: !Sub https://${PublicDomainName}/events/simply360
-  Simply360ActionEndpoint:
-    Value: !Sub https://${PublicDomainName}/actions/send-to-channel
-  Simply360SetupUrl:
-    Value: !Sub https://${PublicDomainName}/setup
   Simply360LifecycleEndpoint:
     Value: !Sub https://${PublicDomainName}/lifecycle
+  HealthEndpoint:
+    Value: !Sub https://${PublicDomainName}/healthz
+  HelloRuntimeFunctionArn:
+    Value: !GetAtt HelloRuntimeFunction.Arn

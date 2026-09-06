@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "simply360.hello-acceptance-config/v1",
+  "environment": "DEV",
+  "baseUrl": "https://api.dev.simply360.app",
+  "teamSimplyId": "REQUIRED_TEAM_SIMPLY_ID",
+  "teamIntegrationSimplyId": "REQUIRED_TEAM_INTEGRATION_SIMPLY_ID",
+  "teamUserLinkSimplyId": "REQUIRED_TEAM_USER_LINK_SIMPLY_ID",
+  "integrationInstallationGrantSimplyId": "REQUIRED_INSTALLATION_GRANT_SIMPLY_ID",
+  "integrationAppVersionSimplyId": "REQUIRED_APP_VERSION_SIMPLY_ID",
+  "dataCollectionSimplyId": "REQUIRED_DATA_COLLECTION_SIMPLY_ID",
+  "titleDataFieldSimplyId": "REQUIRED_TITLE_FIELD_SIMPLY_ID",
+  "blueprintPackageKey": "hello-records"
+}

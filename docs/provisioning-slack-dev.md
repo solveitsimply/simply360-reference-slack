@@ -1,4 +1,24 @@
-# Provision the Slack development proof
+# Deferred Slack development proof
+
+The September 2026 selected milestone is the provider-neutral private hello
+app. Do not execute the Slack workspace/app, Slack credential, remote-action,
+or inbound-trigger steps below for that milestone. They are retained as the
+reviewed full-provider extension and require a later explicit decision.
+
+For the selected hello proof, the immutable submission/registration receipt
+must supply the NATIVE/NONE client ID and the public publisher, app, version,
+release, and OAuth-client Simply IDs. Configure those exact values together
+with the canonical audience `urn:simply360:public-api`, resource
+`urn:simply360:team-api`, `dev` environment, exact HTTPS authorize/token
+endpoints, and the allowlisted
+`https://reference-slack.dev.simply360.app/oauth/simply360/callback`. No client
+secret exists for this public client. The external authorization request must
+not contain a Team or installation ID; Simply360 hosted consent makes that
+choice and the returned public identity receipt binds credential custody.
+The runtime accepts only `/healthz`, the two Simply360 OAuth routes,
+`/events/simply360`, and `/lifecycle`. Its deployment parameters must copy the
+exact receipt coordinates and manifest-declared subscription/lifecycle event
+types; do not add legacy Slack, setup, action, or management routes.
 
 These are owner-interactive instructions for Jake. They do not assert that any
 step has occurred. Stop if a name, scope, environment, account, or cost differs
@@ -22,7 +42,7 @@ from this document.
 - Recurring-cost ceiling: $25/month; expected low-volume range is $2–$10/month
 - Only synthetic publisher-test-Team data is permitted.
 
-The following must exist before Slack verifies callbacks:
+The following must exist before the deferred Slack provider verifies callbacks:
 
 1. published, version-pinned `@simply360/integration-sdk` and
    `@simply360/blueprint-sdk`;
@@ -200,17 +220,29 @@ hashes, timestamps, and sanitized status—not tokens or payload content.
   families, disable callbacks, preserve metadata/hash-only evidence, and do not
   attempt silent fallback credentials.
 
-## External blockers
+## Remaining selected-hello evidence
 
-As of this repository implementation:
+As of this repository implementation, the selected private hello proof still
+needs:
 
-- Jake has not provisioned the Slack workspace/app/credentials.
-- The public HTTPS runtime stack is not provisioned.
-- The two `@simply360` SDKs are not published.
-- Public `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` wire schemas/clients are
+- the exact private app/version/release/OAuth-client registration receipt;
+- the deployed platform's narrow private-hello activation and external
+  provider-account-link attestation boundary;
+- the reviewed immutable Lambda artifact and stack deployment;
+- two real hosted-consent installations plus account-link, read/write, signed
+  event, selective-revoke, uninstall, and zero-charge evidence; and
+- external Blueprint lifecycle proof against the same accepted source.
+
+The packed Integration, Blueprint, and platform SDKs are sufficient for this
+milestone; npm publication is deferred. The canonical SSM-backed publisher
+test account supplies the existing approved publisher bootstrap, so no
+real-member session is required.
+
+The deferred full Slack provider proof separately remains blocked because:
+
+- Jake has not provisioned the Slack workspace/app/credentials;
+- the public HTTPS runtime stack is not provisioned;
+- the two `@simply360` SDKs are not published; and
+- public `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` wire schemas/clients are
   absent. The repository's runnable action route and trigger outbox are local
   harnesses and are not substitutes for those public contracts.
-- Hosted Simply360 authorization and marketplace submission are not available
-  to this repository.
-
-Until all five close against the exact accepted SHA, this proof is local-only.

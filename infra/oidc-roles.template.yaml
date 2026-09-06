@@ -84,6 +84,58 @@ Resources:
                   - logs:DeleteRetentionPolicy
                   - logs:PutRetentionPolicy
                 Resource: arn:aws:logs:us-east-1:*:log-group:/aws/apigateway/Simply360ReferenceSlackDev*
+              - Sid: ManageExactHelloLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DeleteRetentionPolicy
+                  - logs:PutRetentionPolicy
+                Resource: arn:aws:logs:us-east-1:592668326732:log-group:/aws/lambda/simply360-reference-slack-dev-hello
+              - Sid: ManageExactHelloTable
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                Resource: arn:aws:dynamodb:us-east-1:592668326732:table/simply360-reference-slack-dev-hello-state
+              - Sid: ManageExactHelloFunction
+                Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:DeleteFunctionConcurrency
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetPolicy
+                  - lambda:ListTags
+                  - lambda:PutFunctionConcurrency
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                Resource: arn:aws:lambda:us-east-1:592668326732:function:simply360-reference-slack-dev-hello
+              - Sid: PassExactHelloRuntimeRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt HelloRuntimeRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+              - Sid: ReadExactHelloArtifact
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${ArtifactBucketArn}/simply360-reference-slack/*
               - Effect: Allow
                 Action:
                   - route53:ChangeResourceRecordSets
@@ -105,6 +157,44 @@ Resources:
                   - secretsmanager:UntagResource
                   - secretsmanager:UpdateSecret
                 Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:s360/reference-slack/dev/runtime-*
+
+  HelloRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: simply360-reference-slack-dev-runtime
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ExactHelloRuntimeData
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactHelloState
+                Effect: Allow
+                Action:
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:TransactGetItems
+                  - dynamodb:TransactWriteItems
+                  - dynamodb:UpdateItem
+                Resource: arn:aws:dynamodb:us-east-1:592668326732:table/simply360-reference-slack-dev-hello-state
+              - Sid: ExactHelloRuntimeSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: arn:aws:secretsmanager:us-east-1:592668326732:secret:s360/reference-slack/dev/runtime-*
+              - Sid: ExactHelloRuntimeLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:us-east-1:592668326732:log-group:/aws/lambda/simply360-reference-slack-dev-hello:*
 
   GitHubDeployRole:
     Type: AWS::IAM::Role
@@ -155,3 +245,5 @@ Outputs:
     Value: !GetAtt GitHubDeployRole.Arn
   StackExecutionRoleArn:
     Value: !GetAtt StackExecutionRole.Arn
+  HelloRuntimeRoleArn:
+    Value: !GetAtt HelloRuntimeRole.Arn
