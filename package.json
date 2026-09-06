@@ -11,10 +11,13 @@
   "scripts": {
     "type-check": "tsc --noEmit",
     "build": "tsc",
+    "package:hello-lambda": "node scripts/package-hello-lambda.mjs",
+    "acceptance:hello": "npm run build && node scripts/run-hello-acceptance.mjs",
     "start": "node dist/main.js",
     "test": "npm run build && node --test test/*.test.js",
     "test:coverage": "npm run build && node --experimental-test-coverage --test --test-coverage-lines=85 --test-coverage-functions=85 --test-coverage-branches=65 test/*.test.js",
     "assets": "npm run build && node scripts/generate-reference-assets.mjs",
+    "assets:hello": "npm run build && node scripts/generate-hello-acceptance-assets.mjs",
     "check:public-boundary": "node scripts/check-public-boundary.mjs",
     "check:public-contract": "node scripts/check-public-contract-snapshot.mjs",
     "check:infra": "node scripts/check-infra.mjs",
@@ -22,6 +25,16 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
+    "esbuild": "^0.25.10",
     "typescript": "~5.7.2"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1127.0",
+    "@aws-sdk/client-secrets-manager": "^3.1127.0",
+    "@aws-sdk/lib-dynamodb": "^3.1127.0",
+    "@simply360/blueprint-sdk": "file:vendor/simply360-blueprint-sdk-0.1.0.tgz",
+    "@simply360/integration-sdk": "file:vendor/simply360-integration-sdk-0.1.0.tgz",
+    "@simply360/sdk": "file:vendor/simply360-sdk-0.1.0.tgz",
+    "zod": "4.4.3"
   }
 }

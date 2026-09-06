@@ -5,7 +5,58 @@ It demonstrates a provider-neutral installation lifecycle first, then Slack as
 an event destination, remote-action provider, and signed inbound-trigger
 provider.
 
-## Status
+## Selected September 2026 acceptance
+
+The current completion target is the private, provider-neutral hello app. Full
+Slack provider behavior remains in this repository as a reviewed future
+extension, but Slack workspace creation, Slack credentials, remote actions,
+inbound triggers, and paid or public distribution are deferred.
+
+The hello client consumes reviewed packed `@simply360/integration-sdk`,
+`@simply360/blueprint-sdk`, and `@simply360/sdk` artifacts from `vendor/`. Its
+hosted OAuth library uses the public NATIVE/NONE authorization-code flow with S256 PKCE. The
+authorization request contains no Team, member, installation, or grant choice;
+the signed-in member chooses an eligible installation on Simply360's hosted
+consent page. Only the token endpoint's validated public
+`authorization_binding` selects the encrypted, exact-grant credential
+namespace after callback.
+
+The source, provider-neutral manifest and Blueprint generator, public-SDK
+acceptance driver, exact-five-route Lambda adapter, bounded infrastructure, and
+local tests are ready. Private app coordinates, immutable artifact upload,
+reviewed dev deployment, and live lifecycle evidence remain pending and must
+be bound to one immutable accepted candidate.
+
+`config/hello-acceptance.template.json` deliberately contains invalid
+`REQUIRED_*` placeholders. Copy it outside source control, fill it only from
+the reviewed registration and Blueprint-install receipts, and check it with:
+
+```bash
+npm run acceptance:hello -- preflight --config /path/to/hello-acceptance.json
+```
+
+The preflight prints credential-source presence only. User-delegated commands
+load the token and its public authorization receipt together from the exact
+encrypted `HELLO_STATE_TABLE_NAME` credential through `AWS_REGION` and
+`HELLO_RUNTIME_SECRET_ID`; lifecycle fences are checked in the same consistent
+read. Service and Team Admin commands read
+`S360_HELLO_INSTALLATION_SERVICE_ACCESS_TOKEN` and
+`S360_HELLO_TEAM_ADMIN_ACCESS_TOKEN`. Commands never print or persist token or
+refresh-credential values. OAuth calls derive Team, installation, member,
+client, and grant authority from the bearer token. Only the Team Admin
+Blueprint/list/revoke calls send the public Team Simply ID header.
+
+The available read-only commands are `read-records`, `list-provider-links`,
+`preview-blueprint-install`, `preview-blueprint-uninstall`, and
+`background-task-status`. `user-write-record`, `service-write-record`,
+`attest-provider-link`,
+`revoke-provider-link`, `install-blueprint`, and `uninstall-blueprint` require
+an explicit `--apply`; every retryable mutation also requires its public
+idempotency key. Install and uninstall use the consent fingerprint and
+projection returned by the immediately preceding public preview in the same
+process.
+
+## Legacy full-provider status
 
 The repository is **mock-ready, not deployed**.
 
@@ -42,11 +93,14 @@ Implemented and tested locally:
 
 Not claimed:
 
-- no Slack workspace, app, token, signing secret, public callback, AWS stack, or
-  live Simply360 installation has been provisioned;
+- the recorded synthetic Slack workspace/channel and app shell exist, but no
+  Slack token, signing secret, installed provider grant, public callback, AWS
+  stack, or live Simply360 installation has been provisioned;
 - no hosted lifecycle or screenshots exist;
-- `@simply360/integration-sdk` and `@simply360/blueprint-sdk` are not published;
-  and
+- the public packages are not published to npm; the selected hello proof uses
+  the reviewed vendored SDK tarballs permitted by the September
+  milestone, while full Slack/Blueprint proof still needs its selected
+  artifact; and
 - the public platform declares `REMOTE_ACTION_V1` and `REMOTE_TRIGGER_V1` but
   does not yet publish their invocation/result wire schemas or client
   functions. The local HTTP action shape and file-backed trigger outbox are
@@ -200,6 +254,12 @@ production authorization code.
 ```text
 src/
   assets.ts                 exact-SHA manifest and structural Blueprint source
+  hello-assets.ts           provider-neutral manifest and Blueprint package
+  hello-acceptance.ts       public SDK lifecycle and account-link proof driver
+  hello-oauth.ts            public NATIVE/NONE SDK client and exact grant custody
+  hello-router.ts           exact hosted five-route HTTP authority
+  hello-lambda.ts           API Gateway adapter and rotating webhook key custody
+  hello-state.ts            encrypted DynamoDB state, credentials, and outcomes
   oauth.ts                  Simply360 authorization-code/PKCE client
   webhook-v2.ts             byte-exact webhook-v2 verifier/signer
   slack-oauth.ts            least-privilege Slack OAuth and revocation
@@ -215,6 +275,8 @@ scripts/
   check-public-contract-snapshot.mjs
   sync-public-event-contract.mjs
   generate-reference-assets.mjs
+  generate-hello-acceptance-assets.mjs
+  run-hello-acceptance.mjs
 test/                       lifecycle, crypto, isolation, and failure matrices
 docs/                       provisioning, privacy, terms, review evidence
 infra/README.md             approved target topology; nothing provisioned
@@ -222,7 +284,8 @@ infra/README.md             approved target topology; nothing provisioned
 
 ## Public-contract handoff
 
-When the two public SDKs are published:
+The selected hello milestone may consume the reviewed packed SDKs. When the
+public SDKs are later published for general distribution:
 
 1. add the reviewed stable package versions;
 2. replace the local OAuth/webhook compatibility code with SDK imports;
