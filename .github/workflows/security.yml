@@ -61,7 +61,17 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
 
+      # The build-provenance wrapper at v2.1.0 calls actions/attest through a
+      # mutable tag, which the repository's full-SHA policy rejects. Invoke the
+      # wrapper's two exact components directly so the same SLSA predicate is
+      # generated and attested without weakening that policy.
+      - name: Generate build provenance predicate
+        id: build-provenance
+        uses: actions/attest-build-provenance/predicate@36fa7d009e22618ca7cd599486979b8150596c74 # predicate@1.1.4
+
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@7668571508540a607bdfd90a87a560489fe372eb # v2.1.0
+        uses: actions/attest@63d2e98e267398337e9a17ec68a5c8d936cb9247 # v2.1.0
         with:
           subject-path: "dist/**/*.js"
+          predicate-type: ${{ steps.build-provenance.outputs.predicate-type }}
+          predicate: ${{ steps.build-provenance.outputs.predicate }}
