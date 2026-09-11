@@ -15,6 +15,8 @@ import { HelloLifecycleFencedError, HelloStateStore } from './hello-state.js';
 
 const MAX_REQUEST_BODY_BYTES = 256 * 1024;
 const CALLBACK_COOKIE = 's360_hello_nonce';
+export const HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION =
+  'simply360.reference-slack.installation-cleanup-receipt/v1' as const;
 
 class HelloRequestBodyError extends Error {
   public constructor(public readonly statusCode: 400 | 413) {
@@ -40,6 +42,15 @@ export interface HelloHostedResponse {
   readonly statusCode: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
+}
+
+export interface HelloInstallationCleanupReceipt {
+  readonly schemaVersion: typeof HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION;
+  readonly installationSimplyId: string;
+  readonly integrationInstallationOperationSimplyId: string;
+  readonly eventSimplyId: string;
+  readonly verifiedBodySha256: string;
+  readonly outcome: 'CLEANED' | 'REPLAYED';
 }
 
 export interface HelloRouterDependencies {
@@ -203,8 +214,20 @@ export class HelloHostedRouter {
       bodySha256: verified.delivery.bodySha256Hex,
     };
     if (occurrence.eventType === 'app.uninstalled') {
+      const payload = APP_PLATFORM_EVENT_PAYLOAD_SCHEMA_BY_EVENT_TYPE['app.uninstalled'].parse(occurrence.payload);
       const result = await this.dependencies.state.fenceAndCleanupInstallation(occurrence.teamIntegrationSimplyId, evidence);
-      return json(200, { outcome: result.replayed ? 'DUPLICATE' : 'CLEANED' });
+      const cleanupReceipt: HelloInstallationCleanupReceipt = {
+        schemaVersion: HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION,
+        installationSimplyId: occurrence.teamIntegrationSimplyId,
+        integrationInstallationOperationSimplyId: payload.integrationInstallationOperationSimplyId,
+        eventSimplyId: occurrence.eventSimplyId,
+        verifiedBodySha256: verified.delivery.bodySha256Hex,
+        outcome: result.replayed ? 'REPLAYED' : 'CLEANED',
+      };
+      return json(200, {
+        outcome: result.replayed ? 'DUPLICATE' : 'CLEANED',
+        cleanupReceipt,
+      });
     }
     if (occurrence.eventType === 'app.grant.revoked') {
       const payload = APP_PLATFORM_EVENT_PAYLOAD_SCHEMA_BY_EVENT_TYPE['app.grant.revoked'].parse(occurrence.payload);
