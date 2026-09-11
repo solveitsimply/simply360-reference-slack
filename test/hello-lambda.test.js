@@ -80,6 +80,37 @@ test('adapts the API Gateway v2 bytes, query, normalized headers, and cookies', 
   assert.equal(Buffer.from(handled[0].body).toString(), '{"snowman":"☃"}');
 });
 
+test('preserves the sanitized signed uninstall cleanup receipt response', async () => {
+  const cleanupReceipt = {
+    schemaVersion: 'simply360.reference-slack.installation-cleanup-receipt/v1',
+    installationSimplyId: 'TINT-0001-AAAA',
+    integrationInstallationOperationSimplyId: 'OPER-0001-AAAA',
+    eventSimplyId: 'EVNT-0001-AAAA',
+    verifiedBodySha256: 'a'.repeat(64),
+    outcome: 'CLEANED',
+  };
+  const adapter = adaptHelloRouterToApiGateway({
+    handle: async () => ({
+      statusCode: 200,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({ outcome: 'CLEANED', cleanupReceipt }),
+    }),
+  });
+  const result = await adapter({
+    rawPath: '/lifecycle',
+    requestContext: { http: { method: 'POST' } },
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.deepEqual(JSON.parse(result.body), { outcome: 'CLEANED', cleanupReceipt });
+  assert.doesNotMatch(result.body, /signature|secret|token/iu);
+});
+
 test('rejects API Gateway requests without exact method/path context before routing', async () => {
   const adapter = adaptHelloRouterToApiGateway({ handle: async () => {
     throw new Error('router must not be reached');

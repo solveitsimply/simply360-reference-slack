@@ -207,6 +207,15 @@ hashes, timestamps, and sanitized status—not tokens or payload content.
 14. Uninstall; prove callbacks, token refresh, actions, triggers, and events
     fail closed and synthetic artifacts are cleaned up.
 
+The successful signed `app.uninstalled` response includes a sanitized cleanup
+receipt only after the installation fence reaches `CLEANED`. Capture its exact
+public installation ID, installation-operation ID, event ID, verified raw-body
+SHA-256, and `CLEANED` or `REPLAYED` outcome. Compare those coordinates with
+the dispatched lifecycle occurrence before retaining the receipt. Do not add a
+receipt-read endpoint or use a Team Admin bearer to recover it, and do not
+retain the raw body, signature, signing-key identity, delivery/attempt IDs,
+credential values, or provider data.
+
 ## 7. Rotation and incident response
 
 - Slack signing-secret rotation is a controlled current/previous overlap with a

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 
 import { signWebhookV2 } from '@simply360/integration-sdk';
@@ -210,7 +211,7 @@ test('durably fences uninstall and exact grant/account-link cleanup before ackno
       calls.push({ kind: 'installation', installation, evidence });
       uninstallAttempts += 1;
       if (uninstallAttempts === 1) throw new Error('injected cleanup interruption');
-      return { replayed: false };
+      return { replayed: uninstallAttempts > 2 };
     },
     fenceAndCleanupGrantAuthority: async (installation, authority, evidence) => {
       calls.push({ kind: 'grant', installation, authority, evidence });
@@ -219,8 +220,30 @@ test('durably fences uninstall and exact grant/account-link cleanup before ackno
   } });
 
   const uninstall = await signedRequest('/lifecycle', occurrence('app.uninstalled', lifecyclePayload('app.uninstalled')));
-  assert.equal((await instance.handle(uninstall)).statusCode, 503);
-  assert.equal((await instance.handle(uninstall)).statusCode, 200);
+  const interrupted = await instance.handle(uninstall);
+  assert.equal(interrupted.statusCode, 503);
+  assert.deepEqual(JSON.parse(interrupted.body), { error: 'DELIVERY_RETRY_REQUIRED' });
+
+  const cleaned = await instance.handle(uninstall);
+  assert.equal(cleaned.statusCode, 200);
+  const expectedCleanupIdentity = {
+    schemaVersion: 'simply360.reference-slack.installation-cleanup-receipt/v1',
+    installationSimplyId: INSTALLATION,
+    integrationInstallationOperationSimplyId: 'OPER-0001-AAAA',
+    eventSimplyId: 'EVNT-0001-AAAA',
+    verifiedBodySha256: createHash('sha256').update(uninstall.body).digest('hex'),
+  };
+  assert.deepEqual(JSON.parse(cleaned.body), {
+    outcome: 'CLEANED',
+    cleanupReceipt: { ...expectedCleanupIdentity, outcome: 'CLEANED' },
+  });
+
+  const replayed = await instance.handle(uninstall);
+  assert.equal(replayed.statusCode, 200);
+  assert.deepEqual(JSON.parse(replayed.body), {
+    outcome: 'DUPLICATE',
+    cleanupReceipt: { ...expectedCleanupIdentity, outcome: 'REPLAYED' },
+  });
   assert.equal(calls[0].installation, INSTALLATION);
   assert.equal(calls[0].evidence.eventSimplyId, 'EVNT-0001-AAAA');
 
@@ -244,6 +267,36 @@ test('durably fences uninstall and exact grant/account-link cleanup before ackno
     grant: 'provider',
     integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA',
   });
+});
+
+test('never exports an uninstall receipt for invalid operation or installation authority', async () => {
+  const cleanups = [];
+  const instance = router({ state: {
+    fenceAndCleanupInstallation: async (...args) => {
+      cleanups.push(args);
+      return { replayed: false };
+    },
+  } });
+  const missingOperation = occurrence('app.uninstalled', {
+    eventType: 'app.uninstalled',
+    appSlug: 'hello-private-dev',
+    appVersion: '1.0.9',
+    idempotencyKey: 'lifecycle-app.uninstalled',
+  });
+  const invalid = await instance.handle(await signedRequest('/lifecycle', missingOperation));
+  assert.equal(invalid.statusCode, 400);
+  assert.deepEqual(JSON.parse(invalid.body), { error: 'INVALID_EVENT' });
+
+  const wrongInstallation = occurrence(
+    'app.uninstalled',
+    lifecyclePayload('app.uninstalled'),
+    { teamIntegrationSimplyId: 'TINT-9999-ZZZZ' },
+  );
+  const denied = await instance.handle(await signedRequest('/lifecycle', wrongInstallation));
+  assert.equal(denied.statusCode, 403);
+  assert.deepEqual(JSON.parse(denied.body), { error: 'EVENT_AUTHORITY_MISMATCH' });
+  assert.deepEqual(cleanups, []);
+  assert.doesNotMatch(invalid.body + denied.body, /cleanupReceipt/u);
 });
 
 test('maps a durable lifecycle fence to a non-retryable conflict', async () => {
