@@ -216,6 +216,17 @@ receipt-read endpoint or use a Team Admin bearer to recover it, and do not
 retain the raw body, signature, signing-key identity, delivery/attempt IDs,
 credential values, or provider data.
 
+The successful signed `app.account-link.revoked` response follows the same
+boundary for one exact provider account-link namespace. After its durable fence
+reaches `CLEANED`, `cleanupReceipt` contains schema version
+`simply360.reference-slack.account-link-cleanup-receipt/v1`, the public
+installation, provider-account-link, installation-operation, and event IDs,
+the verified raw-body SHA-256, and `CLEANED` or `REPLAYED`. The top-level
+outcome remains `CLEANED` or `DUPLICATE`. A failed, invalid, or crossed-authority
+delivery returns no receipt. Verify the receipt against the dispatched event
+and successful delivery hash before retaining it; do not retain the raw signed
+body or add a receipt-read credential or endpoint.
+
 ## 7. Rotation and incident response
 
 - Slack signing-secret rotation is a controlled current/previous overlap with a

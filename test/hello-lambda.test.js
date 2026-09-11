@@ -111,6 +111,40 @@ test('preserves the sanitized signed uninstall cleanup receipt response', async 
   assert.doesNotMatch(result.body, /signature|secret|token/iu);
 });
 
+test('preserves the sanitized signed account-link cleanup receipt response byte-for-byte', async () => {
+  const cleanupReceipt = {
+    schemaVersion: 'simply360.reference-slack.account-link-cleanup-receipt/v1',
+    installationSimplyId: 'TINT-0001-AAAA',
+    integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA',
+    integrationInstallationOperationSimplyId: 'OPER-0001-AAAA',
+    eventSimplyId: 'EVNT-0001-AAAA',
+    verifiedBodySha256: 'b'.repeat(64),
+    outcome: 'REPLAYED',
+  };
+  const body = JSON.stringify({ outcome: 'DUPLICATE', cleanupReceipt });
+  const adapter = adaptHelloRouterToApiGateway({
+    handle: async () => ({
+      statusCode: 200,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body,
+    }),
+  });
+  const result = await adapter({
+    rawPath: '/lifecycle',
+    requestContext: { http: { method: 'POST' } },
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.equal(result.body, body);
+  assert.deepEqual(JSON.parse(result.body), { outcome: 'DUPLICATE', cleanupReceipt });
+  assert.doesNotMatch(result.body, /signature|secret|token/iu);
+});
+
 test('rejects API Gateway requests without exact method/path context before routing', async () => {
   const adapter = adaptHelloRouterToApiGateway({ handle: async () => {
     throw new Error('router must not be reached');
