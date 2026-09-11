@@ -299,6 +299,101 @@ test('never exports an uninstall receipt for invalid operation or installation a
   assert.doesNotMatch(invalid.body + denied.body, /cleanupReceipt/u);
 });
 
+test('exports an exact account-link cleanup receipt only after durable cleanup and on exact replay', async () => {
+  const calls = [];
+  let cleanupAttempts = 0;
+  const instance = router({ state: {
+    fenceAndCleanupGrantAuthority: async (installation, authority, evidence) => {
+      calls.push({ installation, authority, evidence });
+      cleanupAttempts += 1;
+      if (cleanupAttempts === 1) throw new Error('injected account-link cleanup interruption');
+      return { replayed: cleanupAttempts > 2 };
+    },
+  } });
+  const accountLinkRevoked = await signedRequest('/lifecycle', occurrence(
+    'app.account-link.revoked',
+    lifecyclePayload('app.account-link.revoked', {
+      integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA',
+    }),
+  ));
+
+  const interrupted = await instance.handle(accountLinkRevoked);
+  assert.equal(interrupted.statusCode, 503);
+  assert.equal(interrupted.body, JSON.stringify({ error: 'DELIVERY_RETRY_REQUIRED' }));
+  assert.doesNotMatch(interrupted.body, /cleanupReceipt/u);
+
+  const receiptIdentity = {
+    schemaVersion: 'simply360.reference-slack.account-link-cleanup-receipt/v1',
+    installationSimplyId: INSTALLATION,
+    integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA',
+    integrationInstallationOperationSimplyId: 'OPER-0001-AAAA',
+    eventSimplyId: 'EVNT-0001-AAAA',
+    verifiedBodySha256: createHash('sha256').update(accountLinkRevoked.body).digest('hex'),
+  };
+  const cleaned = await instance.handle(accountLinkRevoked);
+  assert.equal(cleaned.statusCode, 200);
+  assert.equal(cleaned.body, JSON.stringify({
+    outcome: 'CLEANED',
+    cleanupReceipt: { ...receiptIdentity, outcome: 'CLEANED' },
+  }));
+
+  const replayed = await instance.handle(accountLinkRevoked);
+  assert.equal(replayed.statusCode, 200);
+  assert.equal(replayed.body, JSON.stringify({
+    outcome: 'DUPLICATE',
+    cleanupReceipt: { ...receiptIdentity, outcome: 'REPLAYED' },
+  }));
+  assert.deepEqual(calls.map(({ installation, authority }) => ({ installation, authority })), [
+    {
+      installation: INSTALLATION,
+      authority: { grant: 'provider', integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA' },
+    },
+    {
+      installation: INSTALLATION,
+      authority: { grant: 'provider', integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA' },
+    },
+    {
+      installation: INSTALLATION,
+      authority: { grant: 'provider', integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA' },
+    },
+  ]);
+  assert.equal(calls[1].evidence.eventSimplyId, 'EVNT-0001-AAAA');
+  assert.equal(calls[1].evidence.bodySha256, receiptIdentity.verifiedBodySha256);
+});
+
+test('never exports an account-link cleanup receipt for invalid or crossed installation authority', async () => {
+  const cleanups = [];
+  const instance = router({ state: {
+    fenceAndCleanupGrantAuthority: async (...args) => {
+      cleanups.push(args);
+      return { replayed: false };
+    },
+  } });
+  const missingLink = occurrence('app.account-link.revoked', {
+    eventType: 'app.account-link.revoked',
+    integrationInstallationOperationSimplyId: 'OPER-0001-AAAA',
+    appSlug: 'hello-private-dev',
+    appVersion: '1.0.9',
+    idempotencyKey: 'lifecycle-app.account-link.revoked',
+  });
+  const invalid = await instance.handle(await signedRequest('/lifecycle', missingLink));
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.body, JSON.stringify({ error: 'INVALID_EVENT' }));
+
+  const crossedInstallation = occurrence(
+    'app.account-link.revoked',
+    lifecyclePayload('app.account-link.revoked', {
+      integrationProviderAccountLinkSimplyId: 'IPAL-0001-AAAA',
+    }),
+    { teamIntegrationSimplyId: 'TINT-9999-ZZZZ' },
+  );
+  const denied = await instance.handle(await signedRequest('/lifecycle', crossedInstallation));
+  assert.equal(denied.statusCode, 403);
+  assert.equal(denied.body, JSON.stringify({ error: 'EVENT_AUTHORITY_MISMATCH' }));
+  assert.deepEqual(cleanups, []);
+  assert.doesNotMatch(invalid.body + denied.body, /cleanupReceipt/u);
+});
+
 test('maps a durable lifecycle fence to a non-retryable conflict', async () => {
   const instance = router({ state: {
     recordWebhookDelivery: async () => { throw new HelloLifecycleFencedError('cleaned'); },

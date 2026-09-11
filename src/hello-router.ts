@@ -17,6 +17,8 @@ const MAX_REQUEST_BODY_BYTES = 256 * 1024;
 const CALLBACK_COOKIE = 's360_hello_nonce';
 export const HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION =
   'simply360.reference-slack.installation-cleanup-receipt/v1' as const;
+export const HELLO_ACCOUNT_LINK_CLEANUP_RECEIPT_SCHEMA_VERSION =
+  'simply360.reference-slack.account-link-cleanup-receipt/v1' as const;
 
 class HelloRequestBodyError extends Error {
   public constructor(public readonly statusCode: 400 | 413) {
@@ -47,6 +49,16 @@ export interface HelloHostedResponse {
 export interface HelloInstallationCleanupReceipt {
   readonly schemaVersion: typeof HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION;
   readonly installationSimplyId: string;
+  readonly integrationInstallationOperationSimplyId: string;
+  readonly eventSimplyId: string;
+  readonly verifiedBodySha256: string;
+  readonly outcome: 'CLEANED' | 'REPLAYED';
+}
+
+export interface HelloAccountLinkCleanupReceipt {
+  readonly schemaVersion: typeof HELLO_ACCOUNT_LINK_CLEANUP_RECEIPT_SCHEMA_VERSION;
+  readonly installationSimplyId: string;
+  readonly integrationProviderAccountLinkSimplyId: string;
   readonly integrationInstallationOperationSimplyId: string;
   readonly eventSimplyId: string;
   readonly verifiedBodySha256: string;
@@ -248,7 +260,19 @@ export class HelloHostedRouter {
         { grant: 'provider', integrationProviderAccountLinkSimplyId: payload.integrationProviderAccountLinkSimplyId },
         evidence,
       );
-      return json(200, { outcome: result.replayed ? 'DUPLICATE' : 'CLEANED' });
+      const cleanupReceipt: HelloAccountLinkCleanupReceipt = {
+        schemaVersion: HELLO_ACCOUNT_LINK_CLEANUP_RECEIPT_SCHEMA_VERSION,
+        installationSimplyId: occurrence.teamIntegrationSimplyId,
+        integrationProviderAccountLinkSimplyId: payload.integrationProviderAccountLinkSimplyId,
+        integrationInstallationOperationSimplyId: payload.integrationInstallationOperationSimplyId,
+        eventSimplyId: occurrence.eventSimplyId,
+        verifiedBodySha256: verified.delivery.bodySha256Hex,
+        outcome: result.replayed ? 'REPLAYED' : 'CLEANED',
+      };
+      return json(200, {
+        outcome: result.replayed ? 'DUPLICATE' : 'CLEANED',
+        cleanupReceipt,
+      });
     }
 
     const outcome = await this.dependencies.state.recordWebhookDelivery(occurrence.teamIntegrationSimplyId, evidence);
