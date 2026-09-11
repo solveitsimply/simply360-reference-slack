@@ -154,6 +154,29 @@ Submit the generated artifacts through the publisher APIs only after the npm
 SDK and remote-protocol blockers are closed. Do not insert marketplace rows
 manually.
 
+### Lambda artifact cold-start check
+
+`npm run package:hello-lambda` emits a deterministic ZIP containing `index.cjs`.
+The bundled AWS SDK dependencies require Node built-ins during initialization;
+CommonJS output supplies Node's normal loader. The previous ESM bundle built
+successfully but failed on cold load with a dynamic `node:https` require.
+The handler remains `index.handler`; [AWS documents `.cjs` as CommonJS](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html).
+
+`npm run check` includes `check:lambda-package`. This check builds the actual ZIP,
+extracts it into an isolated temporary directory, loads its exported handler in
+Node without inherited credentials, module paths or a test loader, and calls
+`GET /healthz`. It also verifies exact cleanup/replay response-byte preservation
+and identical ZIP bytes on a second build. Existing signed-event and durable
+cleanup tests continue to establish receiver behavior. This local package check
+does not establish deployment, signed live delivery or zero-charge acceptance.
+
+The packaging correction is intentionally unallocated/excluded shared
+engineering. It adds no provider operation, Team usage driver, infrastructure,
+permission or recurring charge; existing runtime/provider attribution and the
+private-integration plan's live acceptance gates remain unchanged. Public API,
+SDK, MCP, TeamAgent and mobile contracts are unaffected by the Lambda module
+format.
+
 ## 5. Configure callbacks after the stack is deployed
 
 The Slack manifest pins:
