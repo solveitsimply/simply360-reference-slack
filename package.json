@@ -21,7 +21,8 @@
     "check:public-boundary": "node scripts/check-public-boundary.mjs",
     "check:public-contract": "node scripts/check-public-contract-snapshot.mjs",
     "check:infra": "node scripts/check-infra.mjs",
-    "check": "npm run check:public-boundary && npm run check:public-contract && npm run check:infra && npm run type-check && npm run test:coverage"
+    "check:lambda-package": "node --test scripts/hello-lambda-package.test.mjs",
+    "check": "npm run check:public-boundary && npm run check:public-contract && npm run check:infra && npm run type-check && npm run test:coverage && npm run check:lambda-package"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

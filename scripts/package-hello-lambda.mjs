@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 
 const root = new URL('../', import.meta.url);
 const outputDirectory = new URL('dist-lambda/', root);
-const output = new URL('index.mjs', outputDirectory);
+const output = new URL('index.cjs', outputDirectory);
 const archive = new URL('hello-lambda.zip', outputDirectory);
 
 await rm(outputDirectory, { recursive: true, force: true });
@@ -16,7 +16,9 @@ await build({
   bundle: true,
   platform: 'node',
   target: 'node22',
-  format: 'esm',
+  // Bundled AWS SDK dependencies require Node built-ins during cold start.
+  // Emit native CommonJS so those requires use Node's ordinary module loader.
+  format: 'cjs',
   minify: true,
   sourcemap: false,
   legalComments: 'none',
