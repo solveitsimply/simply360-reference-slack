@@ -37,8 +37,8 @@ Historical `1.0.9` remains byte-bound to source
 `3848891be5a4a2810353765675a3d2cb9e136546`; it is retained for evidence only
 because its commit-pinned incident URL is absent. The repaired `1.0.10`
 baseline preserves the exact `1.0.9` functional definition and binds the
-incident URL to the present `SECURITY.md`. The separately reviewed `1.0.11`
-definition preserves the TEAM-owned `hello-records` Collection and adds only
+incident URL to the present `SECURITY.md`. The `1.0.11` upgrade fixture
+preserves the TEAM-owned `hello-records` Collection and adds only
 the INTEGRATION-owned `hello-integration-notes` Collection with its one `note`
 field. Both Collections use `PRESERVE` on unlink. The successor alone declares
 `app.upgrade.completed` so the signed receiver can retain delivery evidence for
@@ -110,14 +110,15 @@ npm run acceptance:hello -- reconcile-blueprint --config "$HELLO_CONFIG" --apply
 ```
 
 These commands do not replace installation-version consent. Before the
-Blueprint upgrade, publish and complete REVIEW/FINAL for the exact `1.0.11`
-manifest and package, then use the protected Public API with a recently
-authenticated Team Admin to preview and commit the target installation version
-for each shared sibling separately. The driver reads the exact persisted role
-selection, requires the reviewed source epoch and authority revision, creates a
-fresh combined Blueprint preview, and passes that projection directly into the
-version-consent preview. Its apply action seals the fresh CSRF value in the
-private recovery packet and commits once with the supplied idempotency key:
+Blueprint upgrade, publish the exact `1.0.11` manifest and package and complete
+the stages returned by the current review-tier readback. Then use the protected
+Public API with a recently authenticated Team Admin to preview and commit the
+target installation version for each shared sibling separately. The driver
+reads the exact persisted role selection, requires the reviewed source epoch
+and authority revision, creates a fresh combined Blueprint preview, and passes
+that projection directly into the version-consent preview. Its apply action
+seals the fresh CSRF value in the private recovery packet and commits once with
+the supplied idempotency key:
 
 ```bash
 npm run build
