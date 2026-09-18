@@ -534,7 +534,7 @@ const installationVersionCommitPacket = (blueprint, payloadOverrides = {}) => {
 const managedProvenance = (blueprintEntityType, blueprintRef) => ({
   blueprintEntityType, blueprintRef, ownershipDisposition: 'BLUEPRINT_MANAGED',
   teamBlueprintSimplyId: 'TBPR-0001-AAAA', blueprintDefinitionSimplyId: 'BPDF-0001-AAAA',
-  blueprintSlug: 'hello-records', blueprintVersionSimplyId: 'BPVR-0002-AAAA', blueprintVersion: '1.0.10',
+  blueprintSlug: 'hello-records', blueprintVersionSimplyId: 'BPVR-0002-AAAA', blueprintVersion: '1.0.11',
 });
 const managedCollection = { dataCollectionSimplyId: 'DCOL-0002-AAAA',
   blueprintProvenance: [managedProvenance('DATA_COLLECTION', 'hello-integration-notes')] };
