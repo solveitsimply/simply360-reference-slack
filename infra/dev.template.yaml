@@ -121,9 +121,6 @@ Resources:
       Name: !Sub ${AWS::StackName}-http
       ProtocolType: HTTP
       DisableExecuteApiEndpoint: true
-      Tags:
-        simply360:reference-repository: simply360-reference-slack
-        simply360:environment: dev
 
   HttpApiStage:
     Type: AWS::ApiGatewayV2::Stage
