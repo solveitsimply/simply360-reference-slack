@@ -62,7 +62,7 @@ Parameters:
     AllowedPattern: '^[A-Za-z][A-Za-z0-9.]+(,[A-Za-z][A-Za-z0-9.]+)*$'
   Simply360LifecycleEventTypes:
     Type: String
-    AllowedPattern: '^app\.[A-Za-z][A-Za-z0-9.]+(,app\.[A-Za-z][A-Za-z0-9.]+)*$'
+    AllowedPattern: '^app\.[A-Za-z][A-Za-z0-9.-]+(,app\.[A-Za-z][A-Za-z0-9.-]+)*$'
 
 Resources:
   RuntimeSecret:

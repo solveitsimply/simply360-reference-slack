@@ -104,6 +104,11 @@ export const checkInfrastructureTemplates = ({ runtime, roles }) => {
   if ((runtime.match(/Type: AWS::Lambda::Function/gu) ?? []).length !== 1) {
     throw new Error('hosted runtime must contain exactly one Lambda function');
   }
+  const lifecycleEventTypesPattern = /Simply360LifecycleEventTypes:\n    Type: String\n    AllowedPattern: '(.+)'/u.exec(runtime);
+  if (!lifecycleEventTypesPattern) throw new Error('missing infrastructure invariant: lifecycle event types allowed pattern');
+  if (!new RegExp(lifecycleEventTypesPattern[1], 'u').test('app.account-link.revoked')) {
+    throw new Error('lifecycle event types pattern must accept hyphenated segments (e.g. app.account-link.revoked)');
+  }
   for (const [text, label] of [
     [
       'repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev',
