@@ -135,6 +135,10 @@ Resources:
                   - logs:DeleteRetentionPolicy
                   - logs:PutRetentionPolicy
                 Resource: arn:aws:logs:us-east-1:592668326732:log-group:/aws/lambda/simply360-reference-slack-dev-hello
+              - Sid: DescribeLogGroupsForLogGroupHandler
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: arn:aws:logs:us-east-1:592668326732:log-group:*
               - Sid: ManageExactHelloTable
                 Effect: Allow
                 Action:
@@ -159,9 +163,13 @@ Resources:
                   - lambda:DeleteFunctionConcurrency
                   - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionRecursionConfig
                   - lambda:GetPolicy
+                  - lambda:GetRuntimeManagementConfig
                   - lambda:ListTags
                   - lambda:PutFunctionConcurrency
+                  - lambda:PutFunctionRecursionConfig
+                  - lambda:PutRuntimeManagementConfig
                   - lambda:RemovePermission
                   - lambda:TagResource
                   - lambda:UntagResource
@@ -184,7 +192,13 @@ Resources:
               - Effect: Allow
                 Action:
                   - route53:ChangeResourceRecordSets
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
                 Resource: !Sub arn:aws:route53:::hostedzone/${HostedZoneId}
+              - Sid: ListHostedZonesForRecordSetHandler
+                Effect: Allow
+                Action: route53:ListHostedZones
+                Resource: '*'
               - Effect: Allow
                 Action: route53:GetChange
                 Resource: arn:aws:route53:::change/*

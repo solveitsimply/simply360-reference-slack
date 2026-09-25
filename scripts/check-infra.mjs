@@ -141,6 +141,18 @@ export const checkInfrastructureTemplates = ({ runtime, roles }) => {
       'apigateway:RemoveCertificateFromDomain',
       'domain certificate cleanup permission',
     ],
+    ['route53:GetHostedZone', 'record-set handler hosted-zone read'],
+    ['route53:ListResourceRecordSets', 'record-set handler record read'],
+    ['route53:ListHostedZones', 'record-set handler zone listing'],
+    [
+      'lambda:GetRuntimeManagementConfig',
+      'function handler runtime-management read',
+    ],
+    [
+      'lambda:PutFunctionRecursionConfig',
+      'function handler recursion-config write',
+    ],
+    ['logs:DescribeLogGroups', 'log-group handler readback'],
     ['HelloRuntimeRole:', 'separate hello runtime role'],
     ['dynamodb:TransactGetItems', 'atomic fence and credential read'],
     ['dynamodb:TransactWriteItems', 'atomic lifecycle-guarded writes'],
