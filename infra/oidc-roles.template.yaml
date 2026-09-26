@@ -140,6 +140,17 @@ Resources:
                 Effect: Allow
                 Action: logs:DescribeLogGroups
                 Resource: arn:aws:logs:us-east-1:592668326732:log-group:*
+              - Sid: HttpApiStageAccessLogDelivery
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:DescribeResourcePolicies
+                  - logs:GetLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:UpdateLogDelivery
+                Resource: '*'
               - Sid: ManageExactHelloTable
                 Effect: Allow
                 Action:
