@@ -104,6 +104,11 @@ export const checkInfrastructureTemplates = ({ runtime, roles }) => {
   if ((runtime.match(/Type: AWS::Lambda::Function/gu) ?? []).length !== 1) {
     throw new Error('hosted runtime must contain exactly one Lambda function');
   }
+  const lifecycleEventTypesPattern = /Simply360LifecycleEventTypes:\n    Type: String\n    AllowedPattern: '(.+)'/u.exec(runtime);
+  if (!lifecycleEventTypesPattern) throw new Error('missing infrastructure invariant: lifecycle event types allowed pattern');
+  if (!new RegExp(lifecycleEventTypesPattern[1], 'u').test('app.account-link.revoked')) {
+    throw new Error('lifecycle event types pattern must accept hyphenated segments (e.g. app.account-link.revoked)');
+  }
   for (const [text, label] of [
     [
       'repo:solveitsimply@67548625/simply360-reference-slack@1305919064:environment:dev',
@@ -136,6 +141,18 @@ export const checkInfrastructureTemplates = ({ runtime, roles }) => {
       'apigateway:RemoveCertificateFromDomain',
       'domain certificate cleanup permission',
     ],
+    ['route53:GetHostedZone', 'record-set handler hosted-zone read'],
+    ['route53:ListResourceRecordSets', 'record-set handler record read'],
+    ['route53:ListHostedZones', 'record-set handler zone listing'],
+    [
+      'lambda:GetRuntimeManagementConfig',
+      'function handler runtime-management read',
+    ],
+    [
+      'lambda:PutFunctionRecursionConfig',
+      'function handler recursion-config write',
+    ],
+    ['logs:DescribeLogGroups', 'log-group handler readback'],
     ['HelloRuntimeRole:', 'separate hello runtime role'],
     ['dynamodb:TransactGetItems', 'atomic fence and credential read'],
     ['dynamodb:TransactWriteItems', 'atomic lifecycle-guarded writes'],
