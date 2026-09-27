@@ -48,6 +48,7 @@ const router = (overrides = {}) => new HelloHostedRouter({
   } : null),
   eventTypes: overrides.eventTypes ?? ['dataRecord.created'],
   lifecycleEventTypes: overrides.lifecycleEventTypes ?? ['app.install.completed', 'app.setup.completed', 'app.uninstalled', 'app.grant.revoked', 'app.account-link.revoked'],
+  endpointVerificationAuthority: { integrationPublisherSimplyId: 'IPUB-0001-AAAA', integrationAppSimplyId: 'IAPP-0001-AAAA' },
   now: () => NOW,
 });
 
@@ -392,6 +393,90 @@ test('never exports an account-link cleanup receipt for invalid or crossed insta
   assert.equal(denied.body, JSON.stringify({ error: 'EVENT_AUTHORITY_MISMATCH' }));
   assert.deepEqual(cleanups, []);
   assert.doesNotMatch(invalid.body + denied.body, /cleanupReceipt/u);
+});
+
+const CHALLENGE = {
+  schemaVersion: 'simply360.remote-endpoint-path-verification/v1',
+  integrationPublisherSimplyId: 'IPUB-0001-AAAA',
+  integrationAppSimplyId: 'IAPP-0001-AAAA',
+  integrationAppVersionSimplyId: 'IAVR-0001-AAAA',
+  integrationAppVersionEndpointSimplyId: 'IAVE-0001-AAAA',
+  nonce: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+  issuedAt: '2026-09-06T11:59:00.000Z',
+  expiresAt: '2026-09-06T12:04:00.000Z',
+};
+// Simply360's own RFC 8785 canonicalJsonSha256Hex of CHALLENGE (cross-implementation vector).
+const CHALLENGE_SHA256 = '77494eb95ccaf3e484188576af0d5a7f4bef132b30498b8df7ef051469384414';
+
+const challengeRequest = (body, overrides = {}) => request({
+  method: 'POST',
+  path: '/events/simply360',
+  headers: { 'content-type': 'application/json' },
+  body: Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)),
+  ...overrides,
+});
+
+test('answers the exact endpoint-path challenge without reading secrets or state', async () => {
+  const untouched = async () => { throw new Error('endpoint verification must not touch runtime custody'); };
+  const instance = router({
+    resolveWebhookKey: untouched,
+    state: { recordWebhookDelivery: untouched, fenceAndCleanupInstallation: untouched, fenceAndCleanupGrantAuthority: untouched },
+  });
+  const response = await instance.handle(challengeRequest(CHALLENGE));
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['Cache-Control'], 'no-store');
+  assert.deepEqual(JSON.parse(response.body), {
+    schemaVersion: CHALLENGE.schemaVersion,
+    integrationAppVersionEndpointSimplyId: CHALLENGE.integrationAppVersionEndpointSimplyId,
+    nonce: CHALLENGE.nonce,
+    requestSha256: CHALLENGE_SHA256,
+  });
+
+  // The proof binds the canonical request, not the received key order or whitespace.
+  const reordered = `{\n "nonce": "${CHALLENGE.nonce}", ${JSON.stringify(Object.fromEntries(Object.entries(CHALLENGE).filter(([key]) => key !== 'nonce').reverse())).slice(1)}`;
+  const canonical = await instance.handle(challengeRequest(reordered, { headers: { 'content-type': 'application/json; charset=utf-8' } }));
+  assert.equal(canonical.statusCode, 200);
+  assert.equal(JSON.parse(canonical.body).requestSha256, CHALLENGE_SHA256);
+  assert.equal(
+    createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(CHALLENGE).sort(([a], [b]) => (a < b ? -1 : 1))))).digest('hex'),
+    CHALLENGE_SHA256,
+  );
+});
+
+test('rejects malformed, expired, oversized-lifetime, and foreign endpoint-path challenges', async () => {
+  const instance = router();
+  const status = async (body, overrides) => (await instance.handle(challengeRequest(body, overrides))).statusCode;
+  for (const invalid of [
+    { ...CHALLENGE, extra: 'field' },
+    { ...CHALLENGE, nonce: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh' },
+    { ...CHALLENGE, nonce: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9' },
+    { ...CHALLENGE, integrationAppVersionEndpointSimplyId: 'iave-0001-aaaa' },
+    { ...CHALLENGE, issuedAt: '2026-09-06T11:59:00Z' },
+    { ...CHALLENGE, expiresAt: '2026-09-06T11:59:00.000Z' },
+    { ...CHALLENGE, expiresAt: '2026-09-06T12:09:00.001Z' },
+    { ...CHALLENGE, issuedAt: '2026-09-06T11:50:00.000Z', expiresAt: '2026-09-06T12:00:00.000Z' },
+    { ...CHALLENGE, issuedAt: '2026-09-06T12:05:00.001Z', expiresAt: '2026-09-06T12:06:00.000Z' },
+  ]) {
+    assert.equal(await status(invalid), 400, JSON.stringify(invalid));
+  }
+  assert.equal(await status({ ...CHALLENGE, integrationPublisherSimplyId: 'IPUB-9999-ZZZZ' }), 403);
+  assert.equal(await status({ ...CHALLENGE, integrationAppSimplyId: 'IAPP-9999-ZZZZ' }), 403);
+  assert.equal(await status(CHALLENGE, { headers: { 'content-type': 'text/plain' } }), 415);
+  assert.equal(await status(Buffer.alloc(256 * 1024 + 1).toString()), 413);
+
+  // Anything else unsigned is still an unsigned delivery.
+  assert.equal(await status({ ...CHALLENGE, schemaVersion: 'simply360.remote-endpoint-path-verification/v2' }), 401);
+  assert.equal(await status('not json'), 401);
+  assert.equal(await status([CHALLENGE]), 401);
+  assert.equal(await status(occurrence('dataRecord.created', {
+    eventType: 'dataRecord.created',
+    dataCollectionSimplyId: 'DCOL-0001-AAAA',
+    dataRecordSimplyId: 'DREC-0001-AAAA',
+  })), 401);
+  // A signed request and the lifecycle channel never take the challenge path.
+  assert.equal(await status(CHALLENGE, { headers: { 'content-type': 'application/json', 'x-s360-signature': '' } }), 401);
+  assert.equal(await status(CHALLENGE, { path: '/lifecycle' }), 401);
+  assert.equal(await status(CHALLENGE, { method: 'GET' }), 404);
 });
 
 test('maps a durable lifecycle fence to a non-retryable conflict', async () => {

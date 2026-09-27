@@ -228,6 +228,36 @@ test('fails closed on duplicate kid custody, malformed coordinates, malformed JS
   assert.throws(() => resolveHelloWebhookKeyBinding('x'.repeat(65 * 1024), CURRENT.kid, NOW), /unavailable/u);
 });
 
+test('answers the endpoint-path challenge for its own App with an empty runtime secret', async () => {
+  const handler = createHelloLambdaHandler({
+    environment: environment(),
+    secrets: { send: async () => { throw new Error('endpoint verification must not read the runtime secret'); } },
+    now: () => NOW,
+  });
+  const challenge = {
+    schemaVersion: 'simply360.remote-endpoint-path-verification/v1',
+    integrationPublisherSimplyId: 'IPUB-0001-AAAA',
+    integrationAppSimplyId: 'IAPP-0001-AAAA',
+    integrationAppVersionSimplyId: 'IAVR-0002-AAAA',
+    integrationAppVersionEndpointSimplyId: 'IAVE-0001-AAAA',
+    nonce: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+    issuedAt: '2026-09-06T11:59:00.000Z',
+    expiresAt: '2026-09-06T12:04:00.000Z',
+  };
+  const event = (body) => ({
+    rawPath: '/events/simply360',
+    requestContext: { http: { method: 'POST' } },
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const answered = await handler(event(challenge));
+  assert.equal(answered.statusCode, 200);
+  assert.equal(JSON.parse(answered.body).integrationAppVersionEndpointSimplyId, 'IAVE-0001-AAAA');
+  assert.match(JSON.parse(answered.body).requestSha256, /^[a-f0-9]{64}$/u);
+  assert.equal((await handler(event({ ...challenge, integrationAppSimplyId: 'IAPP-9999-ZZZZ' }))).statusCode, 403);
+  assert.throws(() => createHelloLambdaHandler({ environment: environment({ S360_INTEGRATION_APP_SIMPLY_ID: 'iapp-0001-aaaa' }) }));
+});
+
 test('keeps subscription and lifecycle declarations on their exact public channels', () => {
   assert.equal(typeof createHelloLambdaHandler({ environment: environment() }), 'function');
   assert.throws(() => createHelloLambdaHandler({ environment: environment({
