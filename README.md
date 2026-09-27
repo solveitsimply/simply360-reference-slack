@@ -33,23 +33,26 @@ local tests are ready. Private app coordinates, immutable artifact upload,
 reviewed dev deployment, and live lifecycle evidence remain pending and must
 be bound to one immutable accepted candidate.
 
-The reviewed baseline remains `1.0.9` at source
-`3848891be5a4a2810353765675a3d2cb9e136546`; the asset builder refuses to
-relabel that definition under another source. The separately reviewed `1.0.10`
-definition preserves the TEAM-owned `hello-records` Collection and adds only
+Historical `1.0.9` remains byte-bound to source
+`3848891be5a4a2810353765675a3d2cb9e136546`; it is retained for evidence only
+because its commit-pinned incident URL is absent. The repaired `1.0.10`
+baseline preserves the exact `1.0.9` functional definition and binds the
+incident URL to the present `SECURITY.md`. The `1.0.11` upgrade fixture
+preserves the TEAM-owned `hello-records` Collection and adds only
 the INTEGRATION-owned `hello-integration-notes` Collection with its one `note`
 field. Both Collections use `PRESERVE` on unlink. The successor alone declares
 `app.upgrade.completed` so the signed receiver can retain delivery evidence for
-the completed target epoch. Generate either version only from its clean exact
+the completed target epoch. Generate each reviewable version only from its clean exact
 checkout:
 
 ```bash
-npm run assets:hello -- "$(git rev-parse HEAD)" 1.0.9
 npm run assets:hello -- "$(git rev-parse HEAD)" 1.0.10
+npm run assets:hello -- "$(git rev-parse HEAD)" 1.0.11
 ```
 
-Only the command matching that checkout's reviewed version succeeds; unknown
-definition versions fail closed.
+The historical source alone can reproduce `1.0.9`; a successor source can
+produce the repaired baseline and upgrade target. Unknown definition versions
+fail closed.
 
 `config/hello-acceptance.template.json` deliberately contains invalid
 `REQUIRED_*` placeholders. Copy it outside source control, fill it only from
@@ -107,14 +110,15 @@ npm run acceptance:hello -- reconcile-blueprint --config "$HELLO_CONFIG" --apply
 ```
 
 These commands do not replace installation-version consent. Before the
-Blueprint upgrade, publish and complete REVIEW/FINAL for the exact `1.0.10`
-manifest and package, then use the protected Public API with a recently
-authenticated Team Admin to preview and commit the target installation version
-for each shared sibling separately. The driver reads the exact persisted role
-selection, requires the reviewed source epoch and authority revision, creates a
-fresh combined Blueprint preview, and passes that projection directly into the
-version-consent preview. Its apply action seals the fresh CSRF value in the
-private recovery packet and commits once with the supplied idempotency key:
+Blueprint upgrade, publish the exact `1.0.11` manifest and package and complete
+the stages returned by the current review-tier readback. Then use the protected
+Public API with a recently authenticated Team Admin to preview and commit the
+target installation version for each shared sibling separately. The driver
+reads the exact persisted role selection, requires the reviewed source epoch
+and authority revision, creates a fresh combined Blueprint preview, and passes
+that projection directly into the version-consent preview. Its apply action
+seals the fresh CSRF value in the private recovery packet and commits once with
+the supplied idempotency key:
 
 ```bash
 npm run build

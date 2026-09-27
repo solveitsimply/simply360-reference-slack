@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 import { AppManifestV1Schema } from '@simply360/integration-sdk/manifest';
@@ -8,6 +9,7 @@ import {
   HELLO_BLUEPRINT_PACKAGE_KEY,
   HELLO_BASELINE_SEMANTIC_VERSION,
   HELLO_BASELINE_SOURCE_COMMIT,
+  HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION,
   HELLO_LIFECYCLE_EVENT_TYPES,
   HELLO_MANAGED_COLLECTION_REF,
   HELLO_MANAGED_FIELD_REF,
@@ -25,15 +27,22 @@ import {
 const upgradeSourceCommit = '0123456789abcdef0123456789abcdef01234567';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const prettyJsonSha256 = (value) => sha256(`${JSON.stringify(value, null, 2)}\n`);
+const repositoryUrl = 'https://github.com/solveitsimply/simply360-reference-slack';
+
+const sourceDocument = (url, sourceCommit) => {
+  const prefix = `${repositoryUrl}/blob/${sourceCommit}/`;
+  assert.ok(url.startsWith(prefix), `${url} must be pinned to ${sourceCommit}`);
+  return new URL(`../${url.slice(prefix.length)}`, import.meta.url);
+};
 
 test('builds a provider-neutral HYBRID manifest and public Blueprint package from packed SDKs', async () => {
   const bundle = await buildHelloAcceptanceBundle({
-    sourceCommit: HELLO_BASELINE_SOURCE_COMMIT,
+    sourceCommit: upgradeSourceCommit,
     semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION,
   });
   assert.doesNotThrow(() => AppManifestV1Schema.parse(bundle.manifest));
-  assert.equal(bundle.manifest.provenance.sourceCommit, HELLO_BASELINE_SOURCE_COMMIT);
-  assert.equal(bundle.blueprintPackage.provenance.sourceCommit, HELLO_BASELINE_SOURCE_COMMIT);
+  assert.equal(bundle.manifest.provenance.sourceCommit, upgradeSourceCommit);
+  assert.equal(bundle.blueprintPackage.provenance.sourceCommit, upgradeSourceCommit);
   assert.equal(bundle.manifest.blueprintPackages[0].packageKey, HELLO_BLUEPRINT_PACKAGE_KEY);
   assert.equal(bundle.manifest.blueprintPackages[0].sha256, bundle.blueprintPackageSha256);
   assert.equal(bundle.manifest.blueprintPackages[0].required, true);
@@ -74,11 +83,11 @@ test('builds a provider-neutral HYBRID manifest and public Blueprint package fro
 test('preserves every reviewed 3848891/1.0.9 asset byte while selecting the historical definition', async () => {
   const baseline = await buildHelloAcceptanceBundle({
     sourceCommit: HELLO_BASELINE_SOURCE_COMMIT,
-    semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION,
+    semanticVersion: HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION,
   });
   const bundleReceipt = {
     sourceCommit: HELLO_BASELINE_SOURCE_COMMIT,
-    semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION,
+    semanticVersion: HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION,
     blueprintPackageSha256: baseline.blueprintPackageSha256,
   };
 
@@ -89,7 +98,45 @@ test('preserves every reviewed 3848891/1.0.9 asset byte while selecting the hist
   assert.deepEqual(baseline.blueprintPackage.definition.collections.map(({ collectionKey }) => collectionKey), ['hello-records']);
 });
 
-test('builds 1.0.10 as one additional integration-owned collection with one managed field', async () => {
+test('builds repaired 1.0.10 with the unchanged baseline behavior', async () => {
+  const baseline = await buildHelloAcceptanceBundle({
+    sourceCommit: upgradeSourceCommit,
+    semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION,
+  });
+  const historical = await buildHelloAcceptanceBundle({
+    sourceCommit: HELLO_BASELINE_SOURCE_COMMIT,
+    semanticVersion: HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION,
+  });
+  assert.equal(baseline.manifest.app.semanticVersion, '1.0.10');
+  assert.deepEqual(baseline.manifest.lifecycle.notifications.eventTypes, [...HELLO_LIFECYCLE_EVENT_TYPES].sort());
+  assert.deepEqual(baseline.blueprintPackage.definition, historical.blueprintPackage.definition);
+  for (const key of ['oauth', 'capabilities', 'eventDestinations', 'remoteActions', 'remoteTriggers', 'dataAccess', 'lifecycle']) {
+    assert.deepEqual(baseline.manifest[key], historical.manifest[key], `${key} must preserve baseline behavior`);
+  }
+  assert.match(baseline.manifest.support.incidentUrl, /\/SECURITY\.md$/u);
+});
+
+test('backs every generated commit-pinned support URL with a non-empty source document', async () => {
+  const bundle = await buildHelloAcceptanceBundle({
+    sourceCommit: upgradeSourceCommit,
+    semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION,
+  });
+  const urls = [
+    bundle.manifest.app.supportUrl,
+    bundle.manifest.app.privacyUrl,
+    bundle.manifest.app.termsUrl,
+    bundle.manifest.support.documentationUrl,
+    bundle.manifest.support.incidentUrl,
+    bundle.manifest.support.deprecationPolicyUrl,
+    bundle.blueprintPackage.support.supportUrl,
+  ];
+  for (const url of urls) {
+    const contents = await readFile(sourceDocument(url, upgradeSourceCommit), 'utf8');
+    assert.ok(contents.trim().length > 0, `${url} must reference a non-empty source document`);
+  }
+});
+
+test('builds 1.0.11 as one additional integration-owned collection with one managed field', async () => {
   const upgrade = await buildHelloAcceptanceBundle({
     sourceCommit: upgradeSourceCommit,
     semanticVersion: HELLO_UPGRADE_SEMANTIC_VERSION,
@@ -157,15 +204,19 @@ test('rejects unknown definition versions and refuses to relabel the 1.0.9 basel
     /exact lowercase 40-character Git SHA/u,
   );
   await assert.rejects(
-    buildHelloAcceptanceBundle({ sourceCommit: upgradeSourceCommit, semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION }),
+    buildHelloAcceptanceBundle({ sourceCommit: upgradeSourceCommit, semanticVersion: HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION }),
     /historical source commit/u,
+  );
+  await assert.rejects(
+    buildHelloAcceptanceBundle({ sourceCommit: HELLO_BASELINE_SOURCE_COMMIT, semanticVersion: HELLO_BASELINE_SEMANTIC_VERSION }),
+    /repaired 1\.0\.10 baseline requires a successor source commit/u,
   );
   await assert.rejects(
     buildHelloAcceptanceBundle({ sourceCommit: HELLO_BASELINE_SOURCE_COMMIT, semanticVersion: HELLO_UPGRADE_SEMANTIC_VERSION }),
     /requires a successor source commit/u,
   );
   await assert.rejects(
-    buildHelloAcceptanceBundle({ sourceCommit: upgradeSourceCommit, semanticVersion: '1.0.11' }),
-    /must select the reviewed 1\.0\.9 baseline or 1\.0\.10 upgrade/u,
+    buildHelloAcceptanceBundle({ sourceCommit: upgradeSourceCommit, semanticVersion: '1.0.12' }),
+    /must select historical 1\.0\.9, repaired baseline 1\.0\.10, or upgrade 1\.0\.11/u,
   );
 });

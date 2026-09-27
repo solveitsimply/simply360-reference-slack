@@ -22,8 +22,9 @@ export const HELLO_APP_SLUG = 'marketplace-hello-app';
 export const HELLO_PUBLISHER_SLUG = 'hello-app-dev-publisher';
 export const HELLO_BLUEPRINT_PACKAGE_KEY = 'hello-records';
 export const HELLO_BASELINE_SOURCE_COMMIT = '3848891be5a4a2810353765675a3d2cb9e136546';
-export const HELLO_BASELINE_SEMANTIC_VERSION = '1.0.9';
-export const HELLO_UPGRADE_SEMANTIC_VERSION = '1.0.10';
+export const HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION = '1.0.9';
+export const HELLO_BASELINE_SEMANTIC_VERSION = '1.0.10';
+export const HELLO_UPGRADE_SEMANTIC_VERSION = '1.0.11';
 export const HELLO_MANAGED_COLLECTION_REF = 'hello-integration-notes';
 export const HELLO_MANAGED_FIELD_REF = 'hello-integration-notes.note';
 export const HELLO_MANAGED_FIELD_TITLE = 'Note';
@@ -96,10 +97,22 @@ const integrationOwnedNotesCollection = () =>
   });
 
 const helloBlueprintDefinition = (input: { readonly sourceCommit: string; readonly semanticVersion: string }) => {
-  if (input.semanticVersion === HELLO_BASELINE_SEMANTIC_VERSION) {
+  if (input.semanticVersion === HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION) {
     if (input.sourceCommit !== HELLO_BASELINE_SOURCE_COMMIT) {
       throw new Error('the reviewed 1.0.9 definition is bound to its historical source commit');
     }
+  } else if (input.semanticVersion === HELLO_BASELINE_SEMANTIC_VERSION) {
+    if (input.sourceCommit === HELLO_BASELINE_SOURCE_COMMIT) {
+      throw new Error('the repaired 1.0.10 baseline requires a successor source commit with SECURITY.md');
+    }
+  } else if (input.semanticVersion !== HELLO_UPGRADE_SEMANTIC_VERSION) {
+    throw new Error('semanticVersion must select historical 1.0.9, repaired baseline 1.0.10, or upgrade 1.0.11');
+  }
+
+  if (
+    input.semanticVersion === HELLO_HISTORICAL_BASELINE_SEMANTIC_VERSION ||
+    input.semanticVersion === HELLO_BASELINE_SEMANTIC_VERSION
+  ) {
     return defineExternalBlueprint({
       collections: [helloRecordsCollection()],
       smartCollections: [],
@@ -119,36 +132,33 @@ const helloBlueprintDefinition = (input: { readonly sourceCommit: string; readon
       ],
     });
   }
-  if (input.semanticVersion === HELLO_UPGRADE_SEMANTIC_VERSION) {
-    if (input.sourceCommit === HELLO_BASELINE_SOURCE_COMMIT) {
-      throw new Error('the reviewed 1.0.10 definition requires a successor source commit');
-    }
-    return defineExternalBlueprint({
-      collections: [helloRecordsCollection(), integrationOwnedNotesCollection()],
-      smartCollections: [],
-      dataViews: [],
-      reports: [],
-      labels: [],
-      sharedCollectionContracts: [],
-      mappings: [],
-      options: [],
-      lifecycle: [
-        defineLifecycleDeclaration({
-          resourceType: 'COLLECTION',
-          collectionKey: 'hello-records',
-          owner: 'TEAM',
-          uninstallBehavior: 'PRESERVE',
-        }),
-        defineLifecycleDeclaration({
-          resourceType: 'COLLECTION',
-          collectionKey: HELLO_MANAGED_COLLECTION_REF,
-          owner: 'INTEGRATION',
-          uninstallBehavior: 'PRESERVE',
-        }),
-      ],
-    });
+  if (input.sourceCommit === HELLO_BASELINE_SOURCE_COMMIT) {
+    throw new Error('the reviewed 1.0.11 definition requires a successor source commit');
   }
-  throw new Error('semanticVersion must select the reviewed 1.0.9 baseline or 1.0.10 upgrade definition');
+  return defineExternalBlueprint({
+    collections: [helloRecordsCollection(), integrationOwnedNotesCollection()],
+    smartCollections: [],
+    dataViews: [],
+    reports: [],
+    labels: [],
+    sharedCollectionContracts: [],
+    mappings: [],
+    options: [],
+    lifecycle: [
+      defineLifecycleDeclaration({
+        resourceType: 'COLLECTION',
+        collectionKey: 'hello-records',
+        owner: 'TEAM',
+        uninstallBehavior: 'PRESERVE',
+      }),
+      defineLifecycleDeclaration({
+        resourceType: 'COLLECTION',
+        collectionKey: HELLO_MANAGED_COLLECTION_REF,
+        owner: 'INTEGRATION',
+        uninstallBehavior: 'PRESERVE',
+      }),
+    ],
+  });
 };
 
 export const buildHelloAcceptanceBundle = async (input: {
