@@ -33,6 +33,17 @@ local tests are ready. Private app coordinates, immutable artifact upload,
 reviewed dev deployment, and live lifecycle evidence remain pending and must
 be bound to one immutable accepted candidate.
 
+Before a record-events endpoint can carry deliveries, Simply360 proves control
+of its exact URL with one unsigned `simply360.remote-endpoint-path-verification/v1`
+challenge POSTed to `/events/simply360`. The receiver answers only its own
+publisher and App (the Lambda's `S360_INTEGRATION_PUBLISHER_SIMPLY_ID` and
+`S360_INTEGRATION_APP_SIMPLY_ID`), rejects malformed, expired, or over-ten-minute
+challenges, and echoes the endpoint Simply ID and nonce with `requestSha256`,
+the lowercase hex SHA-256 of the challenge's RFC 8785 canonical JSON. The
+exchange reads no secret and writes no state, so it works before the runtime
+secret holds any key. Every other unsigned request on that route is still
+rejected as an unsigned delivery.
+
 Historical `1.0.9` remains byte-bound to source
 `3848891be5a4a2810353765675a3d2cb9e136546`; it is retained for evidence only
 because its commit-pinned incident URL is absent. The repaired `1.0.10`

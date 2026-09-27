@@ -210,12 +210,17 @@ export const createHelloLambdaHandler = (input: {
     now,
   });
   const secretLoader = new RuntimeSecretLoader(secretId, secrets, now);
+  const integrationPublisherSimplyId = required(environment, 'S360_INTEGRATION_PUBLISHER_SIMPLY_ID');
+  const integrationAppSimplyId = required(environment, 'S360_INTEGRATION_APP_SIMPLY_ID');
+  assertSimplyId(integrationPublisherSimplyId, 'S360_INTEGRATION_PUBLISHER_SIMPLY_ID');
+  assertSimplyId(integrationAppSimplyId, 'S360_INTEGRATION_APP_SIMPLY_ID');
   const router = new HelloHostedRouter({
     oauth,
     state,
     resolveWebhookKey: (kid) => secretLoader.resolveWebhookKey(kid),
     eventTypes: eventTypes(required(environment, 'S360_EVENT_TYPES')),
     lifecycleEventTypes: lifecycleEventTypes(required(environment, 'S360_LIFECYCLE_EVENT_TYPES')),
+    endpointVerificationAuthority: { integrationPublisherSimplyId, integrationAppSimplyId },
     now,
   });
   return adaptHelloRouterToApiGateway(router);

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   APP_PLATFORM_EVENT_PAYLOAD_SCHEMA_BY_EVENT_TYPE,
   isLifecycleEvent,
@@ -9,7 +11,9 @@ import {
   type WebhookV2IdentityHeaders,
   type WebhookV2SigningKey,
 } from '@simply360/integration-sdk';
+import { z } from 'zod';
 
+import { SIMPLY_ID_PATTERN } from './contracts.js';
 import { HelloOAuthClient, HelloOAuthDeniedError } from './hello-oauth.js';
 import { HelloLifecycleFencedError, HelloStateStore } from './hello-state.js';
 
@@ -19,6 +23,42 @@ export const HELLO_INSTALLATION_CLEANUP_RECEIPT_SCHEMA_VERSION =
   'simply360.reference-slack.installation-cleanup-receipt/v1' as const;
 export const HELLO_ACCOUNT_LINK_CLEANUP_RECEIPT_SCHEMA_VERSION =
   'simply360.reference-slack.account-link-cleanup-receipt/v1' as const;
+export const HELLO_ENDPOINT_PATH_VERIFICATION_SCHEMA_VERSION = 'simply360.remote-endpoint-path-verification/v1' as const;
+const MAX_ENDPOINT_PATH_VERIFICATION_TTL_MS = 10 * 60 * 1_000;
+const MAX_ENDPOINT_PATH_VERIFICATION_CLOCK_SKEW_MS = 5 * 60 * 1_000;
+
+const SimplyIdSchema = z.string().regex(SIMPLY_ID_PATTERN);
+const UtcMillisecondTimestampSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u)
+  .refine((value) => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+  });
+// Exactly 32 bytes as canonical unpadded base64url.
+const NonceSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{43}$/u)
+  .refine((value) => Buffer.from(value, 'base64url').toString('base64url') === value);
+const EndpointPathVerificationRequestSchema = z.object({
+  schemaVersion: z.literal(HELLO_ENDPOINT_PATH_VERIFICATION_SCHEMA_VERSION),
+  integrationPublisherSimplyId: SimplyIdSchema,
+  integrationAppSimplyId: SimplyIdSchema,
+  integrationAppVersionSimplyId: SimplyIdSchema,
+  integrationAppVersionEndpointSimplyId: SimplyIdSchema,
+  nonce: NonceSchema,
+  issuedAt: UtcMillisecondTimestampSchema,
+  expiresAt: UtcMillisecondTimestampSchema,
+}).strict();
+type EndpointPathVerificationRequest = z.infer<typeof EndpointPathVerificationRequestSchema>;
+
+/**
+ * RFC 8785 (JCS) serialization of the flat, all-string challenge: keys sorted
+ * by UTF-16 code unit and ECMAScript string escaping, matching Simply360's
+ * canonical JSON for this shape.
+ */
+const canonicalFlatStringJson = (value: Readonly<Record<string, string>>): string =>
+  `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${JSON.stringify(value[key])}`).join(',')}}`;
 
 class HelloRequestBodyError extends Error {
   public constructor(public readonly statusCode: 400 | 413) {
@@ -65,12 +105,26 @@ export interface HelloAccountLinkCleanupReceipt {
   readonly outcome: 'CLEANED' | 'REPLAYED';
 }
 
+export interface HelloEndpointPathVerificationResponse {
+  readonly schemaVersion: typeof HELLO_ENDPOINT_PATH_VERIFICATION_SCHEMA_VERSION;
+  readonly integrationAppVersionEndpointSimplyId: string;
+  readonly nonce: string;
+  readonly requestSha256: string;
+}
+
+/** The only publisher and App whose endpoint-path challenges this receiver answers. */
+export interface HelloEndpointVerificationAuthority {
+  readonly integrationPublisherSimplyId: string;
+  readonly integrationAppSimplyId: string;
+}
+
 export interface HelloRouterDependencies {
   readonly oauth: HelloOAuthClient;
   readonly state: HelloStateStore;
   readonly resolveWebhookKey: (kid: string) => Promise<HelloWebhookKeyBinding | null>;
   readonly eventTypes: readonly AppPlatformSubscriptionEventType[];
   readonly lifecycleEventTypes: readonly AppPlatformLifecycleEventType[];
+  readonly endpointVerificationAuthority: HelloEndpointVerificationAuthority;
   readonly now?: () => number;
 }
 
@@ -140,6 +194,11 @@ export class HelloHostedRouter {
       if (request.method === 'GET' && request.path === '/oauth/simply360/callback') {
         return await this.oauthCallback(request);
       }
+      // Simply360 proves control of the exact event-destination path with one
+      // unsigned challenge before any signing key exists; every delivery is signed.
+      if (request.method === 'POST' && request.path === '/events/simply360' && request.headers['x-s360-signature'] === undefined) {
+        return this.endpointPathVerification(request);
+      }
       if (request.method === 'POST' && (request.path === '/events/simply360' || request.path === '/lifecycle')) {
         return await this.signedEvent(request, request.path === '/lifecycle');
       }
@@ -181,6 +240,60 @@ export class HelloHostedRouter {
         { 'Set-Cookie': clearCallbackCookie() },
       );
     }
+  }
+
+  /**
+   * Echo one Simply360 endpoint-path challenge. The exchange reads no secret,
+   * writes no state, and answers only this receiver's own publisher and App;
+   * any other unsigned body is an unsigned delivery and stays rejected.
+   */
+  private endpointPathVerification(request: HelloHostedRequest): HelloHostedResponse {
+    if (request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
+      return json(415, { error: 'UNSUPPORTED_MEDIA_TYPE' });
+    }
+    const rawBody = textBody(request);
+    let untrusted: unknown;
+    try {
+      untrusted = JSON.parse(rawBody) as unknown;
+    } catch {
+      return json(401, { error: 'INVALID_SIGNATURE' });
+    }
+    if (
+      !untrusted ||
+      typeof untrusted !== 'object' ||
+      Array.isArray(untrusted) ||
+      (untrusted as { schemaVersion?: unknown }).schemaVersion !== HELLO_ENDPOINT_PATH_VERIFICATION_SCHEMA_VERSION
+    ) {
+      return json(401, { error: 'INVALID_SIGNATURE' });
+    }
+    const parsed = EndpointPathVerificationRequestSchema.safeParse(untrusted);
+    if (!parsed.success) return json(400, { error: 'INVALID_ENDPOINT_VERIFICATION' });
+    const challenge: EndpointPathVerificationRequest = parsed.data;
+    const now = this.now();
+    const issuedAt = Date.parse(challenge.issuedAt);
+    const expiresAt = Date.parse(challenge.expiresAt);
+    if (
+      expiresAt <= issuedAt ||
+      expiresAt - issuedAt > MAX_ENDPOINT_PATH_VERIFICATION_TTL_MS ||
+      now >= expiresAt ||
+      issuedAt > now + MAX_ENDPOINT_PATH_VERIFICATION_CLOCK_SKEW_MS
+    ) {
+      return json(400, { error: 'INVALID_ENDPOINT_VERIFICATION' });
+    }
+    const authority = this.dependencies.endpointVerificationAuthority;
+    if (
+      challenge.integrationPublisherSimplyId !== authority.integrationPublisherSimplyId ||
+      challenge.integrationAppSimplyId !== authority.integrationAppSimplyId
+    ) {
+      return json(403, { error: 'ENDPOINT_VERIFICATION_AUTHORITY_MISMATCH' });
+    }
+    const response: HelloEndpointPathVerificationResponse = {
+      schemaVersion: HELLO_ENDPOINT_PATH_VERIFICATION_SCHEMA_VERSION,
+      integrationAppVersionEndpointSimplyId: challenge.integrationAppVersionEndpointSimplyId,
+      nonce: challenge.nonce,
+      requestSha256: createHash('sha256').update(canonicalFlatStringJson(challenge), 'utf8').digest('hex'),
+    };
+    return json(200, { ...response });
   }
 
   private async signedEvent(request: HelloHostedRequest, lifecycle: boolean): Promise<HelloHostedResponse> {
