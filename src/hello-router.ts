@@ -194,9 +194,9 @@ export class HelloHostedRouter {
       if (request.method === 'GET' && request.path === '/oauth/simply360/callback') {
         return await this.oauthCallback(request);
       }
-      // Simply360 proves control of the exact event-destination path with one
+      // Simply360 proves control of each declared callback path with one
       // unsigned challenge before any signing key exists; every delivery is signed.
-      if (request.method === 'POST' && request.path === '/events/simply360' && request.headers['x-s360-signature'] === undefined) {
+      if (request.method === 'POST' && (request.path === '/events/simply360' || request.path === '/lifecycle') && request.headers['x-s360-signature'] === undefined) {
         return this.endpointPathVerification(request);
       }
       if (request.method === 'POST' && (request.path === '/events/simply360' || request.path === '/lifecycle')) {

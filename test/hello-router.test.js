@@ -431,6 +431,9 @@ test('answers the exact endpoint-path challenge without reading secrets or state
     nonce: CHALLENGE.nonce,
     requestSha256: CHALLENGE_SHA256,
   });
+  const lifecycle = await instance.handle(challengeRequest(CHALLENGE, { path: '/lifecycle' }));
+  assert.equal(lifecycle.statusCode, 200);
+  assert.deepEqual(JSON.parse(lifecycle.body), JSON.parse(response.body));
 
   // The proof binds the canonical request, not the received key order or whitespace.
   const reordered = `{\n "nonce": "${CHALLENGE.nonce}", ${JSON.stringify(Object.fromEntries(Object.entries(CHALLENGE).filter(([key]) => key !== 'nonce').reverse())).slice(1)}`;
@@ -473,9 +476,10 @@ test('rejects malformed, expired, oversized-lifetime, and foreign endpoint-path 
     dataCollectionSimplyId: 'DCOL-0001-AAAA',
     dataRecordSimplyId: 'DREC-0001-AAAA',
   })), 401);
-  // A signed request and the lifecycle channel never take the challenge path.
+  // Signed requests on either callback path never take the challenge branch.
   assert.equal(await status(CHALLENGE, { headers: { 'content-type': 'application/json', 'x-s360-signature': '' } }), 401);
-  assert.equal(await status(CHALLENGE, { path: '/lifecycle' }), 401);
+  assert.equal(await status(CHALLENGE, { path: '/lifecycle', headers: { 'content-type': 'application/json', 'x-s360-signature': '' } }), 401);
+  assert.equal(await status(CHALLENGE, { path: '/other' }), 404);
   assert.equal(await status(CHALLENGE, { method: 'GET' }), 404);
 });
 
