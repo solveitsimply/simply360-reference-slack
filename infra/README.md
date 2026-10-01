@@ -110,8 +110,15 @@ trust and inline permissions are limited to the exact state table, retained
 runtime secret, and function log group. The CloudFormation execution role may
 pass only that runtime role to Lambda and may manage only the exact dev function
 and table. Runtime data access is limited to Get/Put/Update/Delete/Query,
-BatchWrite, TransactWrite, and TransactGet; the last operation provides one
+BatchWrite, TransactWrite, TransactGet, and ConditionCheckItem; the condition
+check permission supports the existing lifecycle fences inside transactional
+credential writes. TransactGet provides one
 consistent read of installation fence, exact grant fence, and credential.
+
+This permission correction retains the exact existing DEV table boundary and
+adds no resource or recurring spend. Team cost allocation is intentionally
+unallocated/excluded for the one-time IAM repair; existing receiver activity
+keeps its current allocation boundary.
 
 Create a deterministic Lambda archive from the reviewed source and dependency
 lock:

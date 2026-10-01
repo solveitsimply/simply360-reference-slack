@@ -154,6 +154,7 @@ export const checkInfrastructureTemplates = ({ runtime, roles }) => {
     ],
     ['logs:DescribeLogGroups', 'log-group handler readback'],
     ['HelloRuntimeRole:', 'separate hello runtime role'],
+    ['dynamodb:ConditionCheckItem', 'lifecycle fence checks within credential writes'],
     ['dynamodb:TransactGetItems', 'atomic fence and credential read'],
     ['dynamodb:TransactWriteItems', 'atomic lifecycle-guarded writes'],
     [
