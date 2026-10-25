@@ -32,7 +32,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1127.0",
     "@aws-sdk/client-secrets-manager": "^3.1127.0",
-    "@aws-sdk/lib-dynamodb": "^3.1127.0",
+    "@aws-sdk/lib-dynamodb": "^3.1134.0",
     "@simply360/blueprint-sdk": "file:vendor/simply360-blueprint-sdk-0.1.0.tgz",
     "@simply360/integration-sdk": "file:vendor/simply360-integration-sdk-0.1.0.tgz",
     "@simply360/sdk": "file:vendor/simply360-sdk-0.1.0.tgz",
